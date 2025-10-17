@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Real-time Chat Client</title>
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .auth-section {
+            margin-bottom: 20px;
+            padding: 15px;
+            background: #e3f2fd;
+            border-radius: 5px;
+        }
+        .chat-section {
+            display: none;
+        }
+        .messages {
+            height: 400px;
+            overflow-y: auto;
+            border: 1px solid #ddd;
+            padding: 10px;
+            margin-bottom: 10px;
+            background: #fafafa;
+        }
+        .message {
+            margin-bottom: 10px;
+            padding: 8px 12px;
+            border-radius: 18px;
+            max-width: 70%;
+        }
+        .message.sent {
+            background: #007bff;
+            color: white;
+            margin-left: auto;
+        }
+        .message.received {
+            background: #e9ecef;
+            color: black;
+        }
+        .message-info {
+            font-size: 0.8em;
+            opacity: 0.7;
+            margin-bottom: 2px;
+        }
+        .input-group {
+            display: flex;
+            gap: 10px;
+        }
+        input, button {
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        input[type="text"] {
+            flex: 1;
+        }
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        button:disabled {
+            background: #6c757d;
+            cursor: not-allowed;
+        }
+        .status {
+            padding: 5px 10px;
+            border-radius: 3px;
+            margin: 5px 0;
+            font-size: 0.9em;
+        }
+        .status.online {
+            background: #d4edda;
+            color: #155724;
+        }
+        .status.offline {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        .typing-indicator {
+            font-style: italic;
+            color: #6c757d;
+            font-size: 0.9em;
+            margin: 5px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Real-time Chat Client</h1>
+        
+        <!-- Authentication Section -->
+        <div class="auth-section" id="authSection">
+            <h3>Authentication</h3>
+            <div>
+                <label>Email: <input type="email" id="email" placeholder="user@example.com"></label>
+                <label>Password: <input type="password" id="password" placeholder="password"></label>
+                <button onclick="authenticate()">Login</button>
+            </div>
+            <div id="authStatus"></div>
+        </div>
+
+        <!-- Chat Section -->
+        <div class="chat-section" id="chatSection">
+            <h3>Chat</h3>
+            <div>
+                <label>Chat ID: <input type="text" id="chatId" placeholder="Enter chat ID"></label>
+                <button onclick="joinChat()">Join Chat</button>
+            </div>
+            
+            <div id="connectionStatus" class="status offline">Disconnected</div>
+            <div id="typingIndicator" class="typing-indicator" style="display: none;"></div>
+            
+            <div class="messages" id="messages"></div>
+            
+            <div class="input-group">
+                <input type="text" id="messageInput" placeholder="Type your message..." onkeypress="handleKeyPress(event)">
+                <button onclick="sendMessage()" id="sendBtn">Send</button>
+            </div>
+            
+            <div style="margin-top: 10px;">
+                <button onclick="getOnlineUsers()">Get Online Users</button>
+                <button onclick="disconnect()">Disconnect</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let socket = null;
+        let authToken = null;
+        let currentChatId = null;
+        let isTyping = false;
+        let typingTimeout = null;
+
+        function showStatus(message, type = 'info') {
+            const status = document.getElementById('authStatus');
+            status.textContent = message;
+            status.className = `status ${type}`;
+        }
+
+        function showConnectionStatus(connected) {
+            const status = document.getElementById('connectionStatus');
+            status.textContent = connected ? 'Connected' : 'Disconnected';
+            status.className = `status ${connected ? 'online' : 'offline'}`;
+        }
+
+        async function authenticate() {
+            const email = document.getElementById('email').value;
+            const password = document.getElementById('password').value;
+
+            if (!email || !password) {
+                showStatus('Please enter email and password', 'offline');
+                return;
+            }
+
+            try {
+                const response = await fetch('http://localhost:3001/api/auth/login', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ email, password })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    authToken = data.data.token;
+                    showStatus('Authentication successful!', 'online');
+                    document.getElementById('authSection').style.display = 'none';
+                    document.getElementById('chatSection').style.display = 'block';
+                    connectSocket();
+                } else {
+                    showStatus('Authentication failed: ' + data.message, 'offline');
+                }
+            } catch (error) {
+                showStatus('Authentication error: ' + error.message, 'offline');
+            }
+        }
+
+        function connectSocket() {
+            if (!authToken) {
+                showStatus('No authentication token', 'offline');
+                return;
+            }
+
+            socket = io('http://localhost:3001', {
+                auth: {
+                    token: authToken
+                }
+            });
+
+            socket.on('connect', () => {
+                console.log('Connected to server');
+                showConnectionStatus(true);
+            });
+
+            socket.on('disconnect', () => {
+                console.log('Disconnected from server');
+                showConnectionStatus(false);
+            });
+
+            socket.on('connect_error', (error) => {
+                console.error('Connection error:', error);
+                showStatus('Connection error: ' + error.message, 'offline');
+            });
+
+            // Real-time message events
+            socket.on('new_message', (data) => {
+                console.log('New message received:', data);
+                addMessage(data.message, false);
+            });
+
+            socket.on('user_typing', (data) => {
+                console.log('User typing:', data);
+                showTypingIndicator(data.userId, data.isTyping);
+            });
+
+            socket.on('messages_read', (data) => {
+                console.log('Messages read:', data);
+                // You could update message read status here
+            });
+
+            socket.on('user_online', (data) => {
+                console.log('User online:', data);
+            });
+
+            socket.on('user_offline', (data) => {
+                console.log('User offline:', data);
+            });
+        }
+
+        function joinChat() {
+            const chatId = document.getElementById('chatId').value;
+            if (!chatId) {
+                alert('Please enter a chat ID');
+                return;
+            }
+
+            if (socket) {
+                socket.emit('join_chat', chatId);
+                currentChatId = chatId;
+                showStatus(`Joined chat: ${chatId}`, 'online');
+            }
+        }
+
+        function sendMessage() {
+            const messageInput = document.getElementById('messageInput');
+            const content = messageInput.value.trim();
+
+            if (!content || !currentChatId) {
+                alert('Please enter a message and join a chat first');
+                return;
+            }
+
+            // Send via REST API (which will trigger Socket.IO)
+            fetch('http://localhost:3001/api/chat/send', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${authToken}`
+                },
+                body: JSON.stringify({
+                    chatId: currentChatId,
+                    content: content
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    addMessage(data.data, true);
+                    messageInput.value = '';
+                    stopTyping();
+                } else {
+                    alert('Failed to send message: ' + data.message);
+                }
+            })
+            .catch(error => {
+                alert('Error sending message: ' + error.message);
+            });
+        }
+
+        function addMessage(message, isSent) {
+            const messagesDiv = document.getElementById('messages');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${isSent ? 'sent' : 'received'}`;
+            
+            const infoDiv = document.createElement('div');
+            infoDiv.className = 'message-info';
+            infoDiv.textContent = `${message.senderRole} - ${new Date(message.createdAt).toLocaleTimeString()}`;
+            
+            const contentDiv = document.createElement('div');
+            contentDiv.textContent = message.content;
+            
+            messageDiv.appendChild(infoDiv);
+            messageDiv.appendChild(contentDiv);
+            messagesDiv.appendChild(messageDiv);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }
+
+        function showTypingIndicator(userId, isTyping) {
+            const indicator = document.getElementById('typingIndicator');
+            if (isTyping) {
+                indicator.textContent = `User ${userId} is typing...`;
+                indicator.style.display = 'block';
+            } else {
+                indicator.style.display = 'none';
+            }
+        }
+
+        function handleKeyPress(event) {
+            if (event.key === 'Enter') {
+                sendMessage();
+            } else {
+                startTyping();
+            }
+        }
+
+        function startTyping() {
+            if (!isTyping && currentChatId && socket) {
+                isTyping = true;
+                socket.emit('typing_start', { chatId: currentChatId });
+            }
+
+            clearTimeout(typingTimeout);
+            typingTimeout = setTimeout(stopTyping, 1000);
+        }
+
+        function stopTyping() {
+            if (isTyping && currentChatId && socket) {
+                isTyping = false;
+                socket.emit('typing_stop', { chatId: currentChatId });
+            }
+            clearTimeout(typingTimeout);
+        }
+
+        async function getOnlineUsers() {
+            try {
+                const response = await fetch('http://localhost:3001/api/chat/online-users', {
+                    headers: {
+                        'Authorization': `Bearer ${authToken}`
+                    }
+                });
+                const data = await response.json();
+                
+                if (data.success) {
+                    alert(`Online users: ${data.data.onlineUsers.join(', ')}`);
+                } else {
+                    alert('Failed to get online users: ' + data.message);
+                }
+            } catch (error) {
+                alert('Error getting online users: ' + error.message);
+            }
+        }
+
+        function disconnect() {
+            if (socket) {
+                socket.disconnect();
+                socket = null;
+            }
+            showConnectionStatus(false);
+        }
+    </script>
+</body>
+</html>
+
+
+
+
+
+
+
+
+
+
+
