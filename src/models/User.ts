@@ -11,6 +11,57 @@ export interface IUser extends Document {
   role: "admin" | "landlord" | "tenant";
   isVerified: boolean;
   isActive: boolean;
+  twoFactorEnabled: boolean;
+  documentVerification: {
+    status: "unverified" | "pending" | "verified" | "rejected";
+    documents: {
+      // Common documents
+      idDocument?: {
+        url: string;
+        type: "passport" | "national_id" | "drivers_license";
+        uploadedAt: Date;
+        verified: boolean;
+      };
+      // Tenant documents
+      payslips?: {
+        urls: string[];
+        uploadedAt: Date;
+        verified: boolean;
+      };
+      utilityBills?: {
+        urls: string[];
+        uploadedAt: Date;
+        verified: boolean;
+      };
+      bankStatements?: {
+        urls: string[];
+        uploadedAt: Date;
+        verified: boolean;
+      };
+      employmentLetter?: {
+        url: string;
+        uploadedAt: Date;
+        verified: boolean;
+      };
+      // Landlord documents
+      propertyProof?: {
+        urls: string[];
+        uploadedAt: Date;
+        verified: boolean;
+      };
+      propertyDocuments?: {
+        urls: string[];
+        uploadedAt: Date;
+        verified: boolean;
+      };
+    };
+    adminFeedback?: string;
+    verifiedAt?: Date;
+    verifiedBy?: mongoose.Types.ObjectId;
+    rejectedAt?: Date;
+    rejectedBy?: mongoose.Types.ObjectId;
+    rejectionReason?: string;
+  };
   profile?: {
     avatar?: string;
     bio?: string;
@@ -61,6 +112,61 @@ const userSchema = new Schema<IUser>(
     role: { type: String, enum: ["admin", "landlord", "tenant"], default: "tenant" },
     isVerified: { type: Boolean, default: false },
     isActive: { type: Boolean, default: true },
+    twoFactorEnabled: { type: Boolean, default: false },
+    documentVerification: {
+      status: { 
+        type: String, 
+        enum: ["unverified", "pending", "verified", "rejected"], 
+        default: "unverified" 
+      },
+      documents: {
+        // Common documents
+        idDocument: {
+          url: { type: String },
+          type: { type: String, enum: ["passport", "national_id", "drivers_license"] },
+          uploadedAt: { type: Date },
+          verified: { type: Boolean, default: false }
+        },
+        // Tenant documents
+        payslips: {
+          urls: [{ type: String }],
+          uploadedAt: { type: Date },
+          verified: { type: Boolean, default: false }
+        },
+        utilityBills: {
+          urls: [{ type: String }],
+          uploadedAt: { type: Date },
+          verified: { type: Boolean, default: false }
+        },
+        bankStatements: {
+          urls: [{ type: String }],
+          uploadedAt: { type: Date },
+          verified: { type: Boolean, default: false }
+        },
+        employmentLetter: {
+          url: { type: String },
+          uploadedAt: { type: Date },
+          verified: { type: Boolean, default: false }
+        },
+        // Landlord documents
+        propertyProof: {
+          urls: [{ type: String }],
+          uploadedAt: { type: Date },
+          verified: { type: Boolean, default: false }
+        },
+        propertyDocuments: {
+          urls: [{ type: String }],
+          uploadedAt: { type: Date },
+          verified: { type: Boolean, default: false }
+        }
+      },
+      adminFeedback: { type: String },
+      verifiedAt: { type: Date },
+      verifiedBy: { type: Schema.Types.ObjectId, ref: "User" },
+      rejectedAt: { type: Date },
+      rejectedBy: { type: Schema.Types.ObjectId, ref: "User" },
+      rejectionReason: { type: String }
+    },
     profile: {
       avatar: { type: String },
       bio: { type: String, maxlength: 500 },

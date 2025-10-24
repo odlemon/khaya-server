@@ -2,6 +2,8 @@
 
 import { Request, Response, NextFunction } from "express";
 import { User } from "../models/User";
+import { EmailVerificationService } from "../services/EmailVerificationService";
+import { TwoFactorAuthService } from "../services/TwoFactorAuthService";
 import jwt from "jsonwebtoken";
 
 const JWT_SECRET = process.env.JWT_SECRET || "your_jwt_secret";
@@ -44,7 +46,7 @@ export class AuthController {
         return res.status(409).json({ success: false, message: "Email already registered." });
       }
   
-      // Create user with selected role
+      // Create user with selected role (not verified initially)
       const user = new User({
         email: normalizedEmail,
         password,
@@ -52,35 +54,44 @@ export class AuthController {
         lastName: trimmedLastName,
         phone: phone?.trim(),
         role: role,
-        isVerified: false, // Will be set to true after onboarding completion
-        isActive: true,
+        isVerified: false, // Will be set to true after email verification
+        isActive: false, // Will be set to true after email verification
       });
       await user.save();
-  
-      // Generate JWT token for immediate login
-      const token = jwt.sign({
-        userId: user._id,
-        role: user.role,
-        email: user.email,
-        firstName: user.firstName,
-        lastName: user.lastName,
-      }, JWT_SECRET, { expiresIn: "7d" });
-  
-      return res.status(201).json({
-        success: true,
-        message: `Welcome to Khayalami! You've registered as a ${role}. Please complete your onboarding to get started.`,
-        token,
-        data: {
-          userId: user._id,
-          email: user.email,
-          firstName: user.firstName,
-          lastName: user.lastName,
-          role: user.role,
-          phone: user.phone,
-          isVerified: user.isVerified,
-          requiresOnboarding: true,
-        },
-      });
+
+      // Send verification email
+      try {
+        await EmailVerificationService.sendVerificationEmail({
+          email: normalizedEmail,
+          firstName: trimmedFirstName,
+          lastName: trimmedLastName,
+          role: role
+        });
+
+        return res.status(201).json({
+          success: true,
+          message: `Registration successful! Please check your email (${normalizedEmail}) for a 6-digit verification PIN to activate your ${role} account.`,
+          data: {
+            userId: user._id,
+            email: user.email,
+            firstName: user.firstName,
+            lastName: user.lastName,
+            role: user.role,
+            phone: user.phone,
+            isVerified: user.isVerified,
+            requiresEmailVerification: true,
+            message: "Check your email for verification PIN"
+          },
+        });
+      } catch (emailError) {
+        // If email fails, delete the user and return error
+        await User.findByIdAndDelete(user._id);
+        console.error("Email verification failed:", emailError);
+        return res.status(500).json({
+          success: false,
+          message: "Registration failed. Unable to send verification email. Please try again."
+        });
+      }
     } catch (error: any) {
       console.error("Registration error:", error);
   
@@ -107,12 +118,56 @@ export class AuthController {
 
       // Check if user is active
       if (!user.isActive) {
-        return res.status(401).json({ success: false, message: "Account is deactivated. Please contact support." });
+        return res.status(401).json({ 
+          success: false, 
+          message: "Account is not verified. Please check your email for verification PIN to activate your account.",
+          requiresEmailVerification: true
+        });
+      }
+
+      // Check if user is verified
+      if (!user.isVerified) {
+        return res.status(401).json({ 
+          success: false, 
+          message: "Email not verified. Please check your email for verification PIN to activate your account.",
+          requiresEmailVerification: true
+        });
       }
 
       const isMatch = await user.comparePassword(password);
       if (!isMatch) {
         return res.status(401).json({ success: false, message: "Invalid credentials." });
+      }
+
+      // Check if 2FA is enabled
+      if (user.twoFactorEnabled) {
+        try {
+          // Automatically send 2FA email
+          await TwoFactorAuthService.send2FAEmail(
+            user._id.toString(),
+            user.email,
+            user.firstName
+          );
+          
+          return res.status(200).json({
+            success: true,
+            message: "2FA verification required. Check your email for the verification PIN.",
+            requires2FA: true,
+            data: {
+              userId: user._id,
+              email: user.email,
+              firstName: user.firstName,
+              lastName: user.lastName,
+              role: user.role
+            }
+          });
+        } catch (emailError) {
+          console.error("2FA email sending failed:", emailError);
+          return res.status(500).json({
+            success: false,
+            message: "Unable to send 2FA verification email. Please try again."
+          });
+        }
       }
 
       const token = jwt.sign({
@@ -139,6 +194,73 @@ export class AuthController {
         }
       });
     } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * Verify 2FA PIN for login
+   */
+  async verify2FALogin(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { userId, pin } = req.body;
+
+      if (!userId || !pin) {
+        return res.status(400).json({
+          success: false,
+          message: "User ID and PIN are required"
+        });
+      }
+
+      if (!/^\d{6}$/.test(pin)) {
+        return res.status(400).json({
+          success: false,
+          message: "PIN must be a 6-digit number"
+        });
+      }
+
+      const result = await TwoFactorAuthService.verify2FAPin(userId, pin);
+
+      if (result.success) {
+        // Get user and generate token
+        const user = await User.findById(userId);
+        if (!user) {
+          return res.status(404).json({
+            success: false,
+            message: "User not found"
+          });
+        }
+
+        const token = jwt.sign({
+          userId: user._id,
+          role: user.role,
+          email: user.email,
+          firstName: user.firstName,
+          lastName: user.lastName,
+        }, JWT_SECRET, { expiresIn: "7d" });
+
+        return res.status(200).json({
+          success: true,
+          message: "2FA verified successfully! Logged in.",
+          token,
+          user: {
+            userId: user._id,
+            email: user.email,
+            firstName: user.firstName,
+            lastName: user.lastName,
+            role: user.role,
+            phone: user.phone,
+            isVerified: user.isVerified,
+            twoFactorEnabled: user.twoFactorEnabled
+          }
+        });
+      } else {
+        return res.status(400).json({
+          success: false,
+          message: result.message
+        });
+      }
+    } catch (error: any) {
       next(error);
     }
   }

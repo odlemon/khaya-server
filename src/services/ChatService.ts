@@ -94,7 +94,7 @@ export class ChatService {
       participants: { $all: [tenantIdStr, landlordIdStr] },
       propertyId: propertyIdStr,
       isActive: true
-    }).populate("participants", "firstName lastName email role");
+    }).populate("participants", "firstName lastName email role profile.avatar");
 
     if (!chat) {
       // Create new chat
@@ -104,7 +104,7 @@ export class ChatService {
         isActive: true
       });
       await chat.save();
-      await chat.populate("participants", "firstName lastName email role");
+      await chat.populate("participants", "firstName lastName email role profile.avatar");
       
       console.log('✅ Chat created successfully:', {
         chatId: chat._id,
@@ -124,9 +124,9 @@ export class ChatService {
       participants: userId,
       isActive: true
     })
-    .populate("participants", "firstName lastName email role")
+    .populate("participants", "firstName lastName email role profile.avatar")
     .populate("propertyId", "title address price images")
-    .populate("lastMessage.senderId", "firstName lastName")
+    .populate("lastMessage.senderId", "firstName lastName profile.avatar")
     .sort({ "lastMessage.timestamp": -1, updatedAt: -1 });
 
     // Compute unread counts per chat for this user (exclude user's own messages)
@@ -166,7 +166,7 @@ export class ChatService {
    */
   async getChatById(chatId: string, userId: string): Promise<{ chat: IChat; messages: IMessage[] }> {
     const chat = await Chat.findById(chatId)
-      .populate("participants", "firstName lastName email role")
+      .populate("participants", "firstName lastName email role profile.avatar")
       .populate("propertyId", "title address price images landlordId");
 
     if (!chat) {
@@ -179,7 +179,7 @@ export class ChatService {
     }
 
     const messages = await Message.find({ chatId })
-      .populate("senderId", "firstName lastName email role")
+      .populate("senderId", "firstName lastName email role profile.avatar")
       .sort({ createdAt: 1 });
 
     return { chat, messages };
@@ -734,13 +734,43 @@ export class ChatService {
       return await Chat.findById(chatId).populate("participants", "firstName lastName email role");
     }
 
-    // Add admin to participants
-    chat.participants.push(new Types.ObjectId(adminId));
-    await chat.save();
+    // Add admin to participants (only if not already present)
+    const adminObjectId = new Types.ObjectId(adminId);
+    if (!chat.participants.some(p => p.toString() === adminIdStr)) {
+      chat.participants.push(adminObjectId);
+      await chat.save();
+      console.log(`Admin ${adminId} joined chat ${chatId}`);
+    }
 
-    console.log(`Admin ${adminId} joined chat ${chatId}`);
+    // Clean up any duplicate participants before returning
+    const uniqueParticipants = [...new Set(chat.participants.map(p => p.toString()))];
+    if (uniqueParticipants.length !== chat.participants.length) {
+      chat.participants = uniqueParticipants.map(id => new Types.ObjectId(id));
+      await chat.save();
+      console.log(`Cleaned up duplicate participants in chat ${chatId}`);
+    }
 
     return await Chat.findById(chatId).populate("participants", "firstName lastName email role");
+  }
+
+  /**
+   * Clean up duplicate participants in all chats (Admin only)
+   */
+  async cleanupDuplicateParticipants(): Promise<{ cleanedChats: number }> {
+    const chats = await Chat.find({ isActive: true });
+    let cleanedChats = 0;
+
+    for (const chat of chats) {
+      const uniqueParticipants = [...new Set(chat.participants.map(p => p.toString()))];
+      if (uniqueParticipants.length !== chat.participants.length) {
+        chat.participants = uniqueParticipants.map(id => new Types.ObjectId(id));
+        await chat.save();
+        cleanedChats++;
+        console.log(`Cleaned up duplicate participants in chat ${chat._id}`);
+      }
+    }
+
+    return { cleanedChats };
   }
 
   /**
@@ -772,7 +802,7 @@ export class ChatService {
 
     // Get all messages
     const allMessages = await Message.find({ chatId })
-      .populate("senderId", "firstName lastName email role")
+      .populate("senderId", "firstName lastName email role profile.avatar")
       .sort({ createdAt: 1 });
 
     // Filter based on visibility

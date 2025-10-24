@@ -3,6 +3,7 @@ import { Request, Response, NextFunction } from "express";
 import { Property } from "../models/Property";
 import { User } from "../models/User";
 import { Connection } from "../models/Connection";
+import { DocumentVerificationService } from "../services/DocumentVerificationService";
 import { Types } from "mongoose";
 
 export class PropertyController {
@@ -22,6 +23,18 @@ export class PropertyController {
           success: false, 
           message: "Only landlords can create property listings" 
         });
+      }
+
+      // Check if landlord is document verified (only for landlords, not admins)
+      if (user.role === "landlord") {
+        const isDocumentVerified = await DocumentVerificationService.isUserDocumentVerified(userId);
+        if (!isDocumentVerified) {
+          return res.status(403).json({
+            success: false,
+            message: "You must complete document verification before creating property listings. Please upload and verify your documents first.",
+            requiresDocumentVerification: true
+          });
+        }
       }
 
       const propertyData = {

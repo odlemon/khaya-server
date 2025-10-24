@@ -79,6 +79,11 @@ import serviceProviderRoutes from "./routes/serviceProviderRoutes"
 import commissionRoutes from "./routes/commissionRoutes"
 import userProfileRoutes from "./routes/userProfileRoutes"
 import landlordDashboardRoutes from "./routes/landlordDashboardRoutes"
+import tenantDashboardRoutes from "./routes/tenantDashboardRoutes"
+import emailVerificationRoutes from "./routes/emailVerificationRoutes"
+import twoFactorAuthRoutes from "./routes/twoFactorAuthRoutes"
+import documentVerificationRoutes from "./routes/documentVerificationRoutes"
+import appDocumentVerificationRoutes from "./routes/appDocumentVerificationRoutes"
 
 app.use("/api/users", userRoutes)
 app.use("/api/auth", authRoutes)
@@ -100,6 +105,11 @@ app.use("/api/service-providers", serviceProviderRoutes)
 app.use("/api/commissions", commissionRoutes)
 app.use("/api/user-profiles", userProfileRoutes)
 app.use("/api/landlord", landlordDashboardRoutes)
+app.use("/api/tenant", tenantDashboardRoutes)
+app.use("/api/email-verification", emailVerificationRoutes)
+app.use("/api/2fa", twoFactorAuthRoutes)
+app.use("/api/documents", documentVerificationRoutes)
+app.use("/api/verification", appDocumentVerificationRoutes)
 app.use("/api/admin/dashboard", adminDashboardRoutes)
 app.use("/api/admin/reports", adminReportRoutes)
 app.use(errorMiddleware)

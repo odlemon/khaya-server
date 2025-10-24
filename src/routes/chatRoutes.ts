@@ -40,5 +40,6 @@ router.get("/pending-requests", authorize(["tenant"]), chatController.getTenantP
 // Admin-specific routes
 router.get("/admin/all-chats", authorize(["admin"]), chatController.getAllChats.bind(chatController));
 router.post("/admin/join/:chatId", authorize(["admin"]), chatController.adminJoinChat.bind(chatController));
+router.post("/admin/cleanup-duplicates", authorize(["admin"]), chatController.cleanupDuplicateParticipants.bind(chatController));
 
 export default router; 

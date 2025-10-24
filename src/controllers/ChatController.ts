@@ -103,6 +103,15 @@ export class ChatController {
         
         const isMine = senderIdStr === userId;
         
+        // Debug logging
+        console.log(`Message ownership check:`, {
+          messageId: messageObj._id,
+          senderIdStr,
+          currentUserId: userId,
+          isMine,
+          messageContent: messageObj.content?.substring(0, 20) + '...'
+        });
+        
         return {
           ...messageObj,
           isMine,
@@ -166,6 +175,14 @@ export class ChatController {
         content,
         attachments
       };
+
+      // Debug logging
+      console.log(`Sending message:`, {
+        chatId,
+        senderId: userId,
+        senderRole: userRole,
+        content: content?.substring(0, 20) + '...'
+      });
 
       const message = await chatService.sendMessage(messageData);
 
@@ -727,6 +744,23 @@ export class ChatController {
         success: true,
         message: "Admin joined chat successfully",
         data: chat
+      });
+    } catch (error: any) {
+      next(error);
+    }
+  }
+
+  /**
+   * Admin - Clean up duplicate participants (Admin only)
+   */
+  async cleanupDuplicateParticipants(req: Request, res: Response, next: NextFunction) {
+    try {
+      const result = await chatService.cleanupDuplicateParticipants();
+
+      res.status(200).json({
+        success: true,
+        message: "Duplicate participants cleaned up successfully",
+        data: result
       });
     } catch (error: any) {
       next(error);
