@@ -61,6 +61,12 @@ router.put("/:id",
   (req, res, next) => agreementController.updateAgreement(req, res, next)
 );
 
+// Delete agreement (both landlord and tenant can delete draft/pending agreements)
+router.delete("/:id", 
+  authorize(["landlord", "tenant"]), 
+  (req, res, next) => agreementController.deleteAgreement(req, res, next)
+);
+
 // Send agreement for review (landlord only)
 router.post("/:id/review", 
   authorize(["landlord"]), 
@@ -76,7 +82,19 @@ router.post("/:id/activate",
 // Sign agreement (both landlord and tenant)
 router.post("/:id/sign", (req, res, next) => agreementController.signAgreement(req, res, next));
 
-// Terminate agreement (both landlord and tenant)
+// Request termination (Step 1: Either party requests termination)
+router.post("/:id/request-termination", (req, res, next) => agreementController.requestTermination(req, res, next));
+
+// Confirm termination (Step 2: Other party confirms termination)
+router.post("/:id/confirm-termination", (req, res, next) => agreementController.confirmTermination(req, res, next));
+
+// Reject termination request
+router.post("/:id/reject-termination", (req, res, next) => agreementController.rejectTermination(req, res, next));
+
+// Cancel termination request (requester cancels their own request)
+router.post("/:id/cancel-termination", (req, res, next) => agreementController.cancelTerminationRequest(req, res, next));
+
+// Terminate agreement (both landlord and tenant) - DEPRECATED
 router.post("/:id/terminate", (req, res, next) => agreementController.terminateAgreement(req, res, next));
 
 // Upload attachment to agreement (both landlord and tenant)
@@ -84,5 +102,11 @@ router.post("/:id/attachments", (req, res, next) => agreementController.uploadAt
 
 // Verify signature (public for authenticated users)
 router.get("/signatures/:signatureId/verify", (req, res, next) => agreementController.verifySignature(req, res, next));
+
+// Admin: Get all agreements in the system
+router.get("/admin/all", 
+  authorize(["admin"]), 
+  (req, res, next) => agreementController.getAllAgreements(req, res, next)
+);
 
 export default router; 

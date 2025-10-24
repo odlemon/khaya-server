@@ -69,6 +69,16 @@ import chatRoutes from "./routes/chatRoutes"
 import adminRoutes from "./routes/adminRoutes"
 import setupRoutes from "./routes/setupRoutes"
 import billRoutes from "./routes/billRoutes"
+import rentalRoutes from "./routes/rentalRoutes"
+import paymentRoutes from "./routes/paymentRoutes"
+import serviceRoutes from "./routes/serviceRoutes"
+import adminDashboardRoutes from "./routes/adminDashboardRoutes"
+import adminReportRoutes from "./routes/adminReportRoutes"
+import maintenanceRoutes from "./routes/maintenanceRoutes"
+import serviceProviderRoutes from "./routes/serviceProviderRoutes"
+import commissionRoutes from "./routes/commissionRoutes"
+import userProfileRoutes from "./routes/userProfileRoutes"
+import landlordDashboardRoutes from "./routes/landlordDashboardRoutes"
 
 app.use("/api/users", userRoutes)
 app.use("/api/auth", authRoutes)
@@ -82,6 +92,16 @@ app.use("/api/connections", connectionRoutes)
 app.use("/api/admin", adminRoutes)
 app.use("/api/setup", setupRoutes)
 app.use("/api/bills", billRoutes)
+app.use("/api/rentals", rentalRoutes)
+app.use("/api/payments", paymentRoutes)
+app.use("/api/services", serviceRoutes)
+app.use("/api/maintenance", maintenanceRoutes)
+app.use("/api/service-providers", serviceProviderRoutes)
+app.use("/api/commissions", commissionRoutes)
+app.use("/api/user-profiles", userProfileRoutes)
+app.use("/api/landlord", landlordDashboardRoutes)
+app.use("/api/admin/dashboard", adminDashboardRoutes)
+app.use("/api/admin/reports", adminReportRoutes)
 app.use(errorMiddleware)
 
 // Initialize Socket.IO service

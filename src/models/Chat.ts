@@ -17,9 +17,12 @@ export interface IChat extends Document {
 export interface IMessage extends Document {
   chatId: mongoose.Types.ObjectId;
   senderId: mongoose.Types.ObjectId;
-  senderRole: "landlord" | "tenant";
+  senderRole: "landlord" | "tenant" | "admin";
   messageType: "text" | "image" | "document" | "viewing_request" | "move_in_request";
   content: string;
+  // For private messages: who can see this message
+  visibleTo?: mongoose.Types.ObjectId[]; // If empty/null, visible to all participants
+  taggedUser?: "landlord" | "tenant" | "admin"; // Who was tagged (@landlord, @tenant, or @admin)
   attachments?: {
     type: "image" | "document";
     url: string;
@@ -98,7 +101,7 @@ const messageSchema = new Schema<IMessage>({
   },
   senderRole: {
     type: String,
-    enum: ["landlord", "tenant"],
+    enum: ["landlord", "tenant", "admin"],
     required: true
   },
   messageType: {
@@ -109,6 +112,15 @@ const messageSchema = new Schema<IMessage>({
   content: {
     type: String,
     required: true
+  },
+  // For admin private messages
+  visibleTo: [{
+    type: Schema.Types.ObjectId,
+    ref: "User"
+  }],
+  taggedUser: {
+    type: String,
+    enum: ["landlord", "tenant", "admin"]
   },
   attachments: [{
     type: {

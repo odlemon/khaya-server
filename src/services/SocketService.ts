@@ -176,9 +176,22 @@ class SocketService {
     logger.info(`   Content: ${message.content?.substring(0, 50)}...`);
     logger.info(`   isMine flag: ${message.isMine}`);
     
-    this.io.to(`chat:${chatId}`).emit('new_message', payload);
-    
-    logger.info(`✅ [SOCKET EMIT] Message emitted successfully to room chat:${chatId}`);
+    // If message has visibility restrictions, emit only to specific users
+    if (message.visibleTo && message.visibleTo.length > 0) {
+      const visibleToIds = message.visibleTo.map((id: any) => id.toString ? id.toString() : id);
+      logger.info(`   🔒 Private message - Visible to: ${visibleToIds.join(', ')}`);
+      logger.info(`   Tagged: ${message.taggedUser || 'none'}`);
+      
+      // Emit to each visible user's personal room
+      visibleToIds.forEach((userId: string) => {
+        this.io.to(`user:${userId}`).emit('new_message', payload);
+        logger.info(`   ✅ Emitted to user:${userId}`);
+      });
+    } else {
+      // Public message - emit to entire chat room
+      this.io.to(`chat:${chatId}`).emit('new_message', payload);
+      logger.info(`✅ [SOCKET EMIT] Message emitted successfully to room chat:${chatId}`);
+    }
   }
 
   public emitMessageRead(chatId: string, messageIds: string[], readBy: string) {

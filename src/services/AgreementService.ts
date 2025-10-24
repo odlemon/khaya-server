@@ -291,6 +291,54 @@ export class AgreementService {
   }
 
   /**
+   * Delete agreement (landlord only, draft or pending only)
+   */
+  async deleteAgreement(agreementId: string, landlordId: string): Promise<void> {
+    const agreement = await Agreement.findById(agreementId);
+    
+    if (!agreement) {
+      throw new Error("Agreement not found");
+    }
+
+    // Allow both landlord and tenant to delete
+    const landlordIdStr = agreement.landlordId.toString();
+    const tenantIdStr = agreement.tenantId.toString();
+    const userIdStr = landlordId.toString();
+
+    if (landlordIdStr !== userIdStr && tenantIdStr !== userIdStr) {
+      throw new Error("You are not authorized to delete this agreement");
+    }
+
+    // Only allow deletion of draft and pending agreements
+    if (!["draft", "pending"].includes(agreement.status)) {
+      throw new Error(`Cannot delete ${agreement.status} agreements. Only draft and pending agreements can be deleted.`);
+    }
+
+    // Determine who deleted and who to notify
+    const deletedByLandlord = landlordIdStr === userIdStr;
+    const otherPartyId = deletedByLandlord ? tenantIdStr : landlordIdStr;
+    const otherPartyRole = deletedByLandlord ? "tenant" : "landlord";
+    const deletedBy = deletedByLandlord ? "landlord" : "tenant";
+
+    // Send notification to the other party if agreement was pending
+    if (agreement.status === "pending") {
+      await this.sendAgreementNotification({
+        type: "created", // Using created as fallback
+        recipientId: otherPartyId,
+        recipientRole: otherPartyRole,
+        message: `Agreement "${agreement.title}" has been withdrawn by the ${deletedBy}`,
+        agreementId: agreement._id.toString(),
+        propertyId: agreement.propertyId.toString()
+      });
+    }
+
+    // Delete the agreement
+    await Agreement.findByIdAndDelete(agreementId);
+    
+    console.log(`🗑️ Agreement deleted by ${deletedBy}: ${agreementId}`);
+  }
+
+  /**
    * Send agreement for review (landlord only)
    */
   async sendForReview(agreementId: string, landlordId: string): Promise<IAgreement> {
@@ -441,6 +489,16 @@ export class AgreementService {
         agreementId: agreement._id.toString(),
         propertyId: ((agreement.propertyId as any)?._id ?? agreement.propertyId)?.toString()
       });
+
+      // 🎉 AUTO-CREATE RENTAL when both parties sign
+      try {
+        const { rentalService } = await import("./RentalService");
+        await rentalService.createRentalFromAgreement(agreementId);
+        console.log(`✅ Rental auto-created for agreement: ${agreementId}`);
+      } catch (error: any) {
+        console.error(`❌ Failed to auto-create rental: ${error.message}`);
+        // Don't throw error - rental creation failure shouldn't block signing
+      }
     } else {
       // Send notification to the other party
       const otherPartyId = (userRole === "landlord"
@@ -466,7 +524,14 @@ export class AgreementService {
   /**
    * Terminate agreement (both landlord and tenant)
    */
-  async terminateAgreement(agreementId: string, userId: string, userRole: string, reason: string): Promise<IAgreement> {
+  /**
+   * Request termination (Step 1: First party requests termination)
+   */
+  async requestTermination(agreementId: string, userId: string, userRole: string, data: {
+    reason: string;
+    terminationDate: Date;
+    notes?: string;
+  }): Promise<IAgreement> {
     const agreement = await Agreement.findById(agreementId)
       .populate("propertyId", "title")
       .populate("landlordId", "firstName lastName email")
@@ -476,38 +541,245 @@ export class AgreementService {
       throw new Error("Agreement not found");
     }
 
-    // Check if user is authorized to terminate
-    if (userRole === "landlord" && agreement.landlordId.toString() !== userId) {
-      throw new Error("Only the landlord can terminate this agreement");
+    // Check if user is authorized to request termination
+    const landlordIdStr = (agreement.landlordId as any)?._id?.toString?.() ?? agreement.landlordId?.toString?.();
+    const tenantIdStr = (agreement.tenantId as any)?._id?.toString?.() ?? agreement.tenantId?.toString?.();
+    const userIdStr = userId.toString();
+
+    if (userRole === "landlord" && landlordIdStr !== userIdStr) {
+      throw new Error("Only the landlord can request termination of this agreement");
     }
-    if (userRole === "tenant" && agreement.tenantId.toString() !== userId) {
-      throw new Error("Only the tenant can terminate this agreement");
+    if (userRole === "tenant" && tenantIdStr !== userIdStr) {
+      throw new Error("Only the tenant can request termination of this agreement");
     }
 
+    // Only active agreements can be terminated
+    if (agreement.status !== "active") {
+      throw new Error("Only active agreements can be terminated");
+    }
+
+    // Check if already terminated or pending termination
     if (agreement.status === "terminated") {
       throw new Error("Agreement is already terminated");
     }
+    if (agreement.status === "pending_termination") {
+      throw new Error("Agreement already has a pending termination request");
+    }
 
-    // Update agreement status
-    agreement.status = "terminated";
-    agreement.terminatedAt = new Date();
-    agreement.terminationReason = reason;
-    agreement.terminatedBy = userId;
+    // Set termination request
+    agreement.terminationRequest = {
+      requestedBy: userId as any,
+      requestedByRole: userRole as "landlord" | "tenant",
+      reason: data.reason,
+      terminationDate: data.terminationDate,
+      notes: data.notes,
+      requestedAt: new Date()
+    };
+    agreement.status = "pending_termination";
 
     await agreement.save();
 
     // Send notification to the other party
-    const otherPartyId = userRole === "landlord" ? agreement.tenantId.toString() : agreement.landlordId.toString();
+    const otherPartyId = userRole === "landlord" ? tenantIdStr : landlordIdStr;
     const otherPartyRole = userRole === "landlord" ? "tenant" : "landlord";
 
     await this.sendAgreementNotification({
-      type: "terminated",
+      type: "created", // Using created as fallback
       recipientId: otherPartyId,
       recipientRole: otherPartyRole,
-      message: `Agreement terminated by ${userRole}: ${agreement.title}`,
+      message: `${userRole.charAt(0).toUpperCase() + userRole.slice(1)} has requested to terminate the agreement: ${agreement.title}. Please review and confirm.`,
       agreementId: agreement._id.toString(),
       propertyId: agreement.propertyId.toString()
     });
+
+    return agreement;
+  }
+
+  /**
+   * Confirm termination (Step 2: Other party confirms termination)
+   */
+  async confirmTermination(agreementId: string, userId: string, userRole: string): Promise<IAgreement> {
+    const agreement = await Agreement.findById(agreementId)
+      .populate("propertyId", "title")
+      .populate("landlordId", "firstName lastName email")
+      .populate("tenantId", "firstName lastName email");
+
+    if (!agreement) {
+      throw new Error("Agreement not found");
+    }
+
+    // Check if user is authorized to confirm termination
+    const landlordIdStr = (agreement.landlordId as any)?._id?.toString?.() ?? agreement.landlordId?.toString?.();
+    const tenantIdStr = (agreement.tenantId as any)?._id?.toString?.() ?? agreement.tenantId?.toString?.();
+    const userIdStr = userId.toString();
+
+    if (userRole === "landlord" && landlordIdStr !== userIdStr) {
+      throw new Error("Only the landlord can confirm termination of this agreement");
+    }
+    if (userRole === "tenant" && tenantIdStr !== userIdStr) {
+      throw new Error("Only the tenant can confirm termination of this agreement");
+    }
+
+    // Must be pending termination
+    if (agreement.status !== "pending_termination") {
+      throw new Error("No pending termination request found");
+    }
+
+    // Check if termination request exists
+    if (!agreement.terminationRequest) {
+      throw new Error("No termination request found");
+    }
+
+    // Check if user is NOT the one who requested termination (can't confirm own request)
+    const requestedByStr = agreement.terminationRequest.requestedBy.toString();
+    if (requestedByStr === userIdStr) {
+      throw new Error("You cannot confirm your own termination request");
+    }
+
+    // Terminate the agreement
+    agreement.status = "terminated";
+    agreement.terminatedAt = new Date();
+    agreement.terminatedBy = userId as any;
+
+    await agreement.save();
+
+    // Send notification to both parties
+    const requesterRole = agreement.terminationRequest.requestedByRole;
+    const requesterId = requestedByStr;
+
+    await this.sendAgreementNotification({
+      type: "terminated",
+      recipientId: requesterId,
+      recipientRole: requesterRole,
+      message: `Agreement terminated: ${agreement.title}. The other party has confirmed your termination request.`,
+      agreementId: agreement._id.toString(),
+      propertyId: agreement.propertyId.toString()
+    });
+
+    return agreement;
+  }
+
+  /**
+   * Reject termination request (other party rejects termination)
+   */
+  async rejectTermination(agreementId: string, userId: string, userRole: string, rejectionReason?: string): Promise<IAgreement> {
+    const agreement = await Agreement.findById(agreementId)
+      .populate("propertyId", "title")
+      .populate("landlordId", "firstName lastName email")
+      .populate("tenantId", "firstName lastName email");
+
+    if (!agreement) {
+      throw new Error("Agreement not found");
+    }
+
+    // Check if user is authorized to reject termination
+    const landlordIdStr = (agreement.landlordId as any)?._id?.toString?.() ?? agreement.landlordId?.toString?.();
+    const tenantIdStr = (agreement.tenantId as any)?._id?.toString?.() ?? agreement.tenantId?.toString?.();
+    const userIdStr = userId.toString();
+
+    if (userRole === "landlord" && landlordIdStr !== userIdStr) {
+      throw new Error("Only the landlord can reject termination of this agreement");
+    }
+    if (userRole === "tenant" && tenantIdStr !== userIdStr) {
+      throw new Error("Only the tenant can reject termination of this agreement");
+    }
+
+    // Must be pending termination
+    if (agreement.status !== "pending_termination") {
+      throw new Error("No pending termination request found");
+    }
+
+    // Check if termination request exists
+    if (!agreement.terminationRequest) {
+      throw new Error("No termination request found");
+    }
+
+    // Check if user is NOT the one who requested termination
+    const requestedByStr = agreement.terminationRequest.requestedBy.toString();
+    if (requestedByStr === userIdStr) {
+      throw new Error("You cannot reject your own termination request");
+    }
+
+    // Revert status back to active and clear termination request
+    agreement.status = "active";
+    agreement.terminationRequest = undefined;
+
+    await agreement.save();
+
+    // Send notification to requester
+    const requesterRole = agreement.terminationRequest?.requestedByRole || "landlord";
+
+    await this.sendAgreementNotification({
+      type: "created", // Using created as fallback
+      recipientId: requestedByStr,
+      recipientRole: requesterRole,
+      message: `Your termination request for "${agreement.title}" was declined${rejectionReason ? `: ${rejectionReason}` : '.'}`,
+      agreementId: agreement._id.toString(),
+      propertyId: agreement.propertyId.toString()
+    });
+
+    return agreement;
+  }
+
+  /**
+   * Cancel termination request (requester cancels their own request)
+   */
+  async cancelTerminationRequest(agreementId: string, userId: string, userRole: string): Promise<IAgreement> {
+    const agreement = await Agreement.findById(agreementId);
+
+    if (!agreement) {
+      throw new Error("Agreement not found");
+    }
+
+    // Must be pending termination
+    if (agreement.status !== "pending_termination") {
+      throw new Error("No pending termination request found");
+    }
+
+    // Check if termination request exists
+    if (!agreement.terminationRequest) {
+      throw new Error("No termination request found");
+    }
+
+    // Check if user is the one who requested termination
+    const requestedByStr = agreement.terminationRequest.requestedBy.toString();
+    const userIdStr = userId.toString();
+
+    if (requestedByStr !== userIdStr) {
+      throw new Error("Only the requester can cancel their own termination request");
+    }
+
+    // Revert status back to active and clear termination request
+    agreement.status = "active";
+    agreement.terminationRequest = undefined;
+
+    await agreement.save();
+
+    return agreement;
+  }
+
+  /**
+   * Legacy method: Direct termination (kept for backward compatibility, but now deprecated)
+   * @deprecated Use requestTermination and confirmTermination instead
+   */
+  async terminateAgreement(agreementId: string, userId: string, userRole: string, reason: string): Promise<IAgreement> {
+    // This now acts as a shortcut that immediately terminates (for admin or special cases)
+    const agreement = await Agreement.findById(agreementId);
+
+    if (!agreement) {
+      throw new Error("Agreement not found");
+    }
+
+    if (agreement.status !== "active") {
+      throw new Error("Only active agreements can be terminated");
+    }
+
+    // Direct termination (bypass 2-step process)
+    agreement.status = "terminated";
+    agreement.terminatedAt = new Date();
+    agreement.terminatedBy = userId as any;
+
+    await agreement.save();
 
     return agreement;
   }
@@ -1181,6 +1453,52 @@ Generated on ${new Date().toLocaleDateString('en-US', {
     });
 
     return agreementsWithFormatted;
+  }
+
+  /**
+   * Admin: Get all agreements in the system
+   */
+  async getAllAgreements(
+    filters?: {
+      status?: string;
+      landlordId?: string;
+      tenantId?: string;
+      propertyId?: string;
+      startDate?: Date;
+      endDate?: Date;
+    }
+  ): Promise<IAgreement[]> {
+    const query: any = {};
+    
+    if (filters?.status) {
+      query.status = filters.status;
+    }
+    if (filters?.landlordId) {
+      query.landlordId = new Types.ObjectId(filters.landlordId);
+    }
+    if (filters?.tenantId) {
+      query.tenantId = new Types.ObjectId(filters.tenantId);
+    }
+    if (filters?.propertyId) {
+      query.propertyId = new Types.ObjectId(filters.propertyId);
+    }
+    if (filters?.startDate || filters?.endDate) {
+      query.createdAt = {};
+      if (filters.startDate) {
+        query.createdAt.$gte = filters.startDate;
+      }
+      if (filters.endDate) {
+        query.createdAt.$lte = filters.endDate;
+      }
+    }
+    
+    const agreements = await Agreement.find(query)
+      .populate("landlordId", "firstName lastName email phoneNumber")
+      .populate("tenantId", "firstName lastName email phoneNumber")
+      .populate("propertyId", "title address")
+      .sort({ createdAt: -1 });
+    
+    return agreements;
   }
 }
 

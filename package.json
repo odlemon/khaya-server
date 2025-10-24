@@ -6,6 +6,8 @@
     "build": "tsc",
     "start": "node dist/app.js",
     "dev": "ts-node-dev --respawn --transpile-only src/app.ts",
+    "seed:admin": "ts-node src/scripts/seedAdmin.ts",
+    "reset:admin": "ts-node src/scripts/resetAdminPassword.ts",
     "lint": "eslint . --ext .ts",
     "format": "prettier --write 'src/**/*.ts'",
     "prisma:generate": "prisma generate",
@@ -48,6 +50,7 @@
     "socket.io": "^4.8.1"
   },
   "devDependencies": {
+    "@types/bcrypt": "^6.0.0",
     "@types/compression": "^1.8.0",
     "@types/cors": "^2.8.18",
     "@types/express": "^5.0.1",

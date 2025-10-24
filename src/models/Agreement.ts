@@ -5,7 +5,7 @@ export interface IAgreement extends Document {
   propertyId: mongoose.Types.ObjectId;
   landlordId: mongoose.Types.ObjectId;
   tenantId: mongoose.Types.ObjectId;
-  status: "draft" | "pending" | "signed" | "active" | "expired" | "terminated";
+  status: "draft" | "pending" | "signed" | "active" | "expired" | "terminated" | "pending_termination";
   type: "tenancy" | "maintenance" | "service";
   
   // Agreement Details
@@ -69,12 +69,24 @@ export interface IAgreement extends Document {
     coverage: string[];
   };
   
+  // Termination Request (2-step process)
+  terminationRequest?: {
+    requestedBy: mongoose.Types.ObjectId;
+    requestedByRole: "landlord" | "tenant";
+    reason: string;
+    terminationDate: Date;
+    notes?: string;
+    requestedAt: Date;
+  };
+  
   // Timestamps
   createdAt: Date;
   updatedAt: Date;
   signedAt?: Date;
   activatedAt?: Date;
   expiredAt?: Date;
+  terminatedAt?: Date;
+  terminatedBy?: mongoose.Types.ObjectId;
 }
 
 const agreementSchema = new Schema<IAgreement>({
@@ -83,7 +95,7 @@ const agreementSchema = new Schema<IAgreement>({
   tenantId: { type: Schema.Types.ObjectId, ref: "User", required: true },
   status: { 
     type: String, 
-    enum: ["draft", "pending", "signed", "active", "expired", "terminated"], 
+    enum: ["draft", "pending", "signed", "active", "expired", "terminated", "pending_termination"], 
     default: "draft" 
   },
   type: { 
@@ -151,7 +163,21 @@ const agreementSchema = new Schema<IAgreement>({
     planType: { type: String, enum: ["basic", "premium"], default: "basic" },
     monthlyFee: { type: Number, default: 0 },
     coverage: [{ type: String }]
-  }
+  },
+  
+  // Termination Request (2-step process)
+  terminationRequest: {
+    requestedBy: { type: Schema.Types.ObjectId, ref: "User" },
+    requestedByRole: { type: String, enum: ["landlord", "tenant"] },
+    reason: { type: String },
+    terminationDate: { type: Date },
+    notes: { type: String },
+    requestedAt: { type: Date }
+  },
+  
+  // Termination tracking
+  terminatedAt: { type: Date },
+  terminatedBy: { type: Schema.Types.ObjectId, ref: "User" }
 }, { 
   timestamps: true 
 });

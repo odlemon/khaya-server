@@ -206,6 +206,33 @@ export class AgreementController {
   }
 
   /**
+   * Delete agreement (landlord only)
+   */
+  async deleteAgreement(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { id } = req.params;
+      const userId = (req as any).user._id;
+      const userRole = (req as any).user.role;
+
+      if (userRole !== "landlord") {
+        return res.status(403).json({
+          success: false,
+          message: "Only landlords can delete agreements"
+        });
+      }
+
+      await agreementService.deleteAgreement(id, userId);
+
+      res.status(200).json({
+        success: true,
+        message: "Agreement deleted successfully"
+      });
+    } catch (error: any) {
+      next(error);
+    }
+  }
+
+  /**
    * Send agreement for review (landlord only)
    */
   async sendForReview(req: Request, res: Response, next: NextFunction) {
@@ -267,7 +294,112 @@ export class AgreementController {
   }
 
   /**
-   * Terminate agreement (both landlord and tenant)
+   * Request termination (Step 1: First party requests termination)
+   */
+  async requestTermination(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { id } = req.params;
+      const userId = (req as any).user._id;
+      const userRole = (req as any).user.role;
+      const { reason, terminationDate, notes } = req.body;
+
+      if (!reason) {
+        return res.status(400).json({
+          success: false,
+          message: "Termination reason is required"
+        });
+      }
+
+      if (!terminationDate) {
+        return res.status(400).json({
+          success: false,
+          message: "Termination date is required"
+        });
+      }
+
+      const agreement = await agreementService.requestTermination(id, userId, userRole, {
+        reason,
+        terminationDate: new Date(terminationDate),
+        notes
+      });
+
+      res.status(200).json({
+        success: true,
+        message: "Termination request sent successfully. Waiting for other party to confirm.",
+        data: agreement
+      });
+    } catch (error: any) {
+      next(error);
+    }
+  }
+
+  /**
+   * Confirm termination (Step 2: Other party confirms termination)
+   */
+  async confirmTermination(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { id } = req.params;
+      const userId = (req as any).user._id;
+      const userRole = (req as any).user.role;
+
+      const agreement = await agreementService.confirmTermination(id, userId, userRole);
+
+      res.status(200).json({
+        success: true,
+        message: "Agreement terminated successfully",
+        data: agreement
+      });
+    } catch (error: any) {
+      next(error);
+    }
+  }
+
+  /**
+   * Reject termination request
+   */
+  async rejectTermination(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { id } = req.params;
+      const userId = (req as any).user._id;
+      const userRole = (req as any).user.role;
+      const { rejectionReason } = req.body;
+
+      const agreement = await agreementService.rejectTermination(id, userId, userRole, rejectionReason);
+
+      res.status(200).json({
+        success: true,
+        message: "Termination request rejected",
+        data: agreement
+      });
+    } catch (error: any) {
+      next(error);
+    }
+  }
+
+  /**
+   * Cancel termination request (requester cancels their own request)
+   */
+  async cancelTerminationRequest(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { id } = req.params;
+      const userId = (req as any).user._id;
+      const userRole = (req as any).user.role;
+
+      const agreement = await agreementService.cancelTerminationRequest(id, userId, userRole);
+
+      res.status(200).json({
+        success: true,
+        message: "Termination request cancelled",
+        data: agreement
+      });
+    } catch (error: any) {
+      next(error);
+    }
+  }
+
+  /**
+   * Terminate agreement (both landlord and tenant) - DEPRECATED
+   * @deprecated Use requestTermination and confirmTermination instead
    */
   async terminateAgreement(req: Request, res: Response, next: NextFunction) {
     try {
@@ -525,6 +657,32 @@ export class AgreementController {
         success: true,
         message: "Agreement activated successfully",
         data: agreement
+      });
+    } catch (error: any) {
+      next(error);
+    }
+  }
+
+  /**
+   * Admin: Get all agreements in the system
+   */
+  async getAllAgreements(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { status, landlordId, tenantId, propertyId, startDate, endDate } = req.query;
+      
+      const filters: any = {};
+      if (status) filters.status = status as string;
+      if (landlordId) filters.landlordId = landlordId as string;
+      if (tenantId) filters.tenantId = tenantId as string;
+      if (propertyId) filters.propertyId = propertyId as string;
+      if (startDate) filters.startDate = new Date(startDate as string);
+      if (endDate) filters.endDate = new Date(endDate as string);
+      
+      const agreements = await agreementService.getAllAgreements(filters);
+      
+      res.json({
+        success: true,
+        data: agreements
       });
     } catch (error: any) {
       next(error);

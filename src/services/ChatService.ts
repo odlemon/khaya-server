@@ -4,11 +4,12 @@ import { User } from "../models/User";
 import { Property } from "../models/Property";
 import { Types } from "mongoose";
 import { Connection } from "../models/Connection";
+import { parseMessageMentions } from "../utils/messageParser";
 
 export interface CreateMessageData {
   chatId: string;
   senderId: string;
-  senderRole: "landlord" | "tenant";
+  senderRole: "landlord" | "tenant" | "admin";
   messageType?: "text" | "image" | "document" | "viewing_request" | "move_in_request";
   content: string;
   attachments?: {
@@ -191,14 +192,14 @@ export class ChatService {
     const { chatId, senderId, senderRole, messageType = "text", content, attachments } = data;
 
     // Verify chat exists and user is participant
-    const chat = await Chat.findById(chatId);
+    const chat = await Chat.findById(chatId).populate("participants", "role");
     if (!chat) {
       throw new Error("Chat not found");
     }
 
     // Verify user is participant (convert both to string for comparison)
     const senderIdStr = senderId?.toString?.() || senderId;
-    const isParticipant = chat.participants.some(p => {
+    const isParticipant = chat.participants.some((p: any) => {
       const participantId = p?._id?.toString?.() || p?.toString?.() || p;
       return participantId === senderIdStr;
     });
@@ -206,11 +207,30 @@ export class ChatService {
     if (!isParticipant) {
       console.error('Access denied - User not participant:', {
         senderId: senderIdStr,
-        participants: chat.participants.map(p => p?.toString?.()),
+        participants: chat.participants.map((p: any) => p?.toString?.()),
         chatId
       });
       throw new Error("Access denied");
     }
+
+    // Parse message for @mentions (any user can tag)
+    let visibleTo: any[] = [];
+    let taggedUser: "landlord" | "tenant" | "admin" | null = null;
+
+    const parsed = parseMessageMentions(content);
+    if (parsed.hasTag && parsed.taggedUser) {
+      taggedUser = parsed.taggedUser;
+      
+      // Find the tagged user in participants
+      const currentUserId = senderId;
+      const targetUser = chat.participants.find((p: any) => p.role === parsed.taggedUser);
+      
+      if (targetUser) {
+        visibleTo = [currentUserId, targetUser._id.toString()];
+        console.log(`${senderRole} tagged ${parsed.taggedUser}. Message visible to:`, visibleTo);
+      }
+    }
+    // If no tag or tag not found, visible to all (empty visibleTo array)
 
     // Create message
     const message = new Message({
@@ -219,31 +239,43 @@ export class ChatService {
       senderRole,
       messageType,
       content,
-      attachments
+      attachments,
+      visibleTo: visibleTo.length > 0 ? visibleTo : undefined,
+      taggedUser: taggedUser || undefined
     });
 
     await message.save();
     await message.populate("senderId", "firstName lastName email role");
 
-    // Update chat's last message
+    // Update chat's last message (show for everyone or mention visibility)
     chat.lastMessage = {
-      content: content,
+      content: taggedUser ? `[Private to ${taggedUser}] ${content.substring(0, 50)}...` : content,
       senderId: senderId,
       timestamp: new Date()
     };
     await chat.save();
 
-    // Send notification to other participant
-    const otherParticipant = chat.participants.find(p => p.toString() !== senderId);
-    if (otherParticipant) {
+    // Send notification to recipients
+    const recipients = visibleTo.length > 0 
+      ? chat.participants.filter((p: any) => {
+          const pId = p._id?.toString?.() || p.toString();
+          return visibleTo.includes(pId) && pId !== senderIdStr;
+        })
+      : chat.participants.filter((p: any) => {
+          const pId = p._id?.toString?.() || p.toString();
+          return pId !== senderIdStr;
+        });
+
+    for (const recipient of recipients) {
+      const recipientId = recipient._id?.toString?.() || recipient.toString();
       await this.sendChatNotification({
         type: "new_message",
-        recipientId: otherParticipant.toString(),
+        recipientId,
         senderId: senderId,
         chatId: chatId,
         propertyId: chat.propertyId.toString(),
         message: `New message from ${message.senderId.firstName} ${message.senderId.lastName}`,
-        data: { messageId: message._id }
+        data: { messageId: message._id, isPrivate: visibleTo.length > 0 }
       });
     }
 
@@ -680,6 +712,87 @@ export class ChatService {
       modifiedCount: result.modifiedCount,
       messageIds: messageIds
     };
+  }
+
+  /**
+   * Admin joins a chat conversation
+   */
+  async adminJoinChat(chatId: string, adminId: string): Promise<IChat> {
+    const chat = await Chat.findById(chatId);
+    if (!chat) {
+      throw new Error("Chat not found");
+    }
+
+    // Check if admin already in participants
+    const adminIdStr = adminId.toString();
+    const isAlreadyParticipant = chat.participants.some(p => 
+      p.toString() === adminIdStr
+    );
+
+    if (isAlreadyParticipant) {
+      // Already in chat, just return it
+      return await Chat.findById(chatId).populate("participants", "firstName lastName email role");
+    }
+
+    // Add admin to participants
+    chat.participants.push(new Types.ObjectId(adminId));
+    await chat.save();
+
+    console.log(`Admin ${adminId} joined chat ${chatId}`);
+
+    return await Chat.findById(chatId).populate("participants", "firstName lastName email role");
+  }
+
+  /**
+   * Get all chats (Admin only)
+   */
+  async getAllChats(page: number = 1, limit: number = 50): Promise<{ chats: IChat[], total: number }> {
+    const skip = (page - 1) * limit;
+
+    const chats = await Chat.find({ isActive: true })
+      .populate("participants", "firstName lastName email role")
+      .populate("propertyId", "title address images")
+      .sort({ updatedAt: -1 })
+      .skip(skip)
+      .limit(limit);
+
+    const total = await Chat.countDocuments({ isActive: true });
+
+    return { chats, total };
+  }
+
+  /**
+   * Get chat messages filtered by visibility
+   */
+  async getChatMessagesForUser(chatId: string, userId: string, userRole: string): Promise<IMessage[]> {
+    const chat = await Chat.findById(chatId);
+    if (!chat) {
+      throw new Error("Chat not found");
+    }
+
+    // Get all messages
+    const allMessages = await Message.find({ chatId })
+      .populate("senderId", "firstName lastName email role")
+      .sort({ createdAt: 1 });
+
+    // Filter based on visibility
+    const visibleMessages = allMessages.filter(msg => {
+      // No visibility restriction - everyone sees it
+      if (!msg.visibleTo || msg.visibleTo.length === 0) {
+        return true;
+      }
+
+      // Admin sees everything
+      if (userRole === "admin") {
+        return true;
+      }
+
+      // Check if user is in visibleTo list
+      const visibleToIds = msg.visibleTo.map(id => id.toString());
+      return visibleToIds.includes(userId.toString());
+    });
+
+    return visibleMessages;
   }
 }
 

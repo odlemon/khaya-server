@@ -37,4 +37,8 @@ router.get("/move-in-requests", authorize(["landlord"]), chatController.getLandl
 // Tenant-specific routes
 router.get("/pending-requests", authorize(["tenant"]), chatController.getTenantPendingRequests.bind(chatController));
 
+// Admin-specific routes
+router.get("/admin/all-chats", authorize(["admin"]), chatController.getAllChats.bind(chatController));
+router.post("/admin/join/:chatId", authorize(["admin"]), chatController.adminJoinChat.bind(chatController));
+
 export default router; 

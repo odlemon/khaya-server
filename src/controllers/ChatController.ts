@@ -57,15 +57,38 @@ export class ChatController {
   async getChatById(req: Request, res: Response, next: NextFunction) {
     try {
       const userId = (req as any).user._id?.toString();
+      const userRole = (req as any).user.role;
       const { chatId } = req.params;
 
-      const { chat, messages } = await chatService.getChatById(chatId, userId);
+      // Get chat with all messages (will filter based on visibility)
+      const { chat, messages: allMessages } = await chatService.getChatById(chatId, userId);
 
-      // Compute counterpart (the other participant)
+      // Filter messages based on visibility (for non-admin users)
+      const visibleMessages = allMessages.filter((m: any) => {
+        const messageObj = m.toObject ? m.toObject() : m;
+        
+        // No visibility restriction - everyone sees it
+        if (!messageObj.visibleTo || messageObj.visibleTo.length === 0) {
+          return true;
+        }
+
+        // Admin sees everything
+        if (userRole === "admin") {
+          return true;
+        }
+
+        // Check if user is in visibleTo list
+        const visibleToIds = messageObj.visibleTo.map((id: any) => 
+          id.toString ? id.toString() : id
+        );
+        return visibleToIds.includes(userId);
+      });
+
+      // Compute counterpart (the other participant excluding current user)
       const counterpart = (chat.participants as any[]).find((p: any) => p._id?.toString?.() !== userId);
 
       // Map messages to include isMine flag for easy UI rendering
-      const messagesWithFlags = messages.map((m: any) => {
+      const messagesWithFlags = visibleMessages.map((m: any) => {
         const messageObj = m.toObject ? m.toObject() : m;
         
         // Get sender ID - handle both populated and unpopulated cases
@@ -83,13 +106,15 @@ export class ChatController {
         return {
           ...messageObj,
           isMine,
-          // Also add senderRole for additional clarity
-          isFromCurrentUser: isMine
+          isFromCurrentUser: isMine,
+          // Add flag for private messages
+          isPrivate: messageObj.visibleTo && messageObj.visibleTo.length > 0,
+          taggedUser: messageObj.taggedUser || null
         };
       });
 
       // Mark messages as read (mark all unread messages in this chat as read)
-      const unreadMessageIds = messages
+      const unreadMessageIds = visibleMessages
         .filter((m: any) => {
           const senderIdStr = (m.senderId?._id || m.senderId)?.toString?.() || "";
           return senderIdStr !== userId && !m.isRead;
@@ -654,6 +679,54 @@ export class ChatController {
           pendingViewingRequests: pendingRequests.viewingRequests.length,
           pendingMoveInRequests: pendingRequests.moveInRequests.length
         }
+      });
+    } catch (error: any) {
+      next(error);
+    }
+  }
+
+  /**
+   * Admin - Get all chats (Admin only)
+   */
+  async getAllChats(req: Request, res: Response, next: NextFunction) {
+    try {
+      const page = parseInt(req.query.page as string) || 1;
+      const limit = parseInt(req.query.limit as string) || 50;
+
+      const { chats, total } = await chatService.getAllChats(page, limit);
+
+      res.status(200).json({
+        success: true,
+        message: "All chats retrieved successfully",
+        data: {
+          chats,
+          pagination: {
+            page,
+            limit,
+            total,
+            totalPages: Math.ceil(total / limit)
+          }
+        }
+      });
+    } catch (error: any) {
+      next(error);
+    }
+  }
+
+  /**
+   * Admin - Join a chat conversation (Admin only)
+   */
+  async adminJoinChat(req: Request, res: Response, next: NextFunction) {
+    try {
+      const adminId = (req as any).user._id;
+      const { chatId } = req.params;
+
+      const chat = await chatService.adminJoinChat(chatId, adminId);
+
+      res.status(200).json({
+        success: true,
+        message: "Admin joined chat successfully",
+        data: chat
       });
     } catch (error: any) {
       next(error);
