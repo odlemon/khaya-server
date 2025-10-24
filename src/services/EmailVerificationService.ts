@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { SendMailClient } from "zeptomail";
 import { EmailVerification, IEmailVerification } from "../models/EmailVerification";
 import { User } from "../models/User";

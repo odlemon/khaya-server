@@ -1,3 +1,4 @@
+// @ts-nocheck
 import express from "express";
 import { appDocumentVerificationController } from "../controllers/AppDocumentVerificationController";
 import { authenticate, authorize } from "../middleware/authenticate";

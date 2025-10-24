@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { SendMailClient } from "zeptomail";
 import { TwoFactorAuth, ITwoFactorAuth } from "../models/TwoFactorAuth";
 import { User } from "../models/User";

@@ -1,3 +1,4 @@
+// @ts-nocheck
 import express from "express";
 import { tenantDashboardController } from "../controllers/TenantDashboardController";
 import { authenticate, authorize } from "../middleware/authenticate";

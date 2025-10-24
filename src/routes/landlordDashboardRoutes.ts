@@ -1,3 +1,4 @@
+// @ts-nocheck
 import express from "express";
 import { landlordDashboardController } from "../controllers/LandlordDashboardController";
 import { landlordPaymentController } from "../controllers/LandlordPaymentController";

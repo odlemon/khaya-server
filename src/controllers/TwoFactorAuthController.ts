@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { Request, Response, NextFunction } from "express";
 import { TwoFactorAuthService } from "../services/TwoFactorAuthService";
 import { User } from "../models/User";

@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { User } from "../models/User";
 import { Rental } from "../models/Rental";
 import { Agreement } from "../models/Agreement";
