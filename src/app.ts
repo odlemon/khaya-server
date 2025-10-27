@@ -21,17 +21,22 @@ const app = express()
 const server = createServer(app)
 const io = new SocketIOServer(server, {
   cors: {
-    origin: true,
+    origin: ["https://khaya-portal.vercel.app", "http://localhost:3000", "http://localhost:3001"],
     credentials: true,
     methods: ["GET", "HEAD", "PUT", "PATCH", "POST", "DELETE"]
-  }
+  },
+  // Real-time optimizations
+  transports: ['websocket', 'polling'],
+  allowEIO3: true,
+  pingTimeout: 60000,
+  pingInterval: 25000,
+  maxHttpBufferSize: 1e6
 })
 // Port will be determined dynamically in startServer function
 
 app.use(helmet())
 app.use(cors({
-  // Allow all origins by reflecting the request origin (supports credentials)
-  origin: true,
+  origin: ["https://khaya-portal.vercel.app", "http://localhost:3000", "http://localhost:3001"],
   credentials: true,
   methods: ["GET", "HEAD", "PUT", "PATCH", "POST", "DELETE"],
   allowedHeaders: ["Content-Type", "Authorization"]

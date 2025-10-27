@@ -11,6 +11,9 @@ interface EnvConfig {
   JWT_SECRET?: string
   JWT_EXPIRES_IN?: string
   DEEP_SEEK?: string
+  FRONTEND_URL?: string
+  REDIS_URL?: string
+  SOCKET_MAX_CONNECTIONS?: number
 }
 
 class EnvironmentConfig {
@@ -29,6 +32,9 @@ class EnvironmentConfig {
       JWT_SECRET: process.env.JWT_SECRET,
       JWT_EXPIRES_IN: process.env.JWT_EXPIRES_IN || "7d",
       DEEP_SEEK: process.env.DEEP_SEEK,
+      FRONTEND_URL: process.env.FRONTEND_URL,
+      REDIS_URL: process.env.REDIS_URL,
+      SOCKET_MAX_CONNECTIONS: Number.parseInt(process.env.SOCKET_MAX_CONNECTIONS || "1000", 10),
     }
   }
 
