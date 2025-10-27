@@ -36,7 +36,8 @@ const io = new SocketIOServer(server, {
 
 app.use(helmet())
 app.use(cors({
-  origin: ["https://khaya-portal.vercel.app", "http://localhost:3000", "http://localhost:3001"],
+  // Allow all origins by reflecting the request origin (supports credentials)
+  origin: true,
   credentials: true,
   methods: ["GET", "HEAD", "PUT", "PATCH", "POST", "DELETE"],
   allowedHeaders: ["Content-Type", "Authorization"]
