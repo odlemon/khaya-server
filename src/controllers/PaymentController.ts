@@ -1,6 +1,7 @@
 // @ts-nocheck
 import { Request, Response, NextFunction } from "express";
 import { paymentService } from "../services/PaymentService";
+import { paymentRequestService } from "../services/PaymentRequestService";
 import { CommissionService } from "../services/CommissionService";
 import { Types } from "mongoose";
 
@@ -41,8 +42,6 @@ export class PaymentController {
       // If payment method is external (not in_app), create payment request instead
       if (paymentData.paymentMethod && paymentData.paymentMethod !== "in_app") {
         // External payment - create payment request
-        const { paymentRequestService } = await import("../services/PaymentRequestService");
-        
         if (!paymentData.proofOfPayment) {
           return res.status(400).json({
             success: false,

@@ -61,12 +61,11 @@ const connectionSchema = new Schema<IConnection>({
 });
 
 // Indexes for better query performance
-connectionSchema.index({ tenantId: 1, landlordId: 1, propertyId: 1 });
 connectionSchema.index({ landlordId: 1, status: 1 });
 connectionSchema.index({ tenantId: 1, status: 1 });
 connectionSchema.index({ propertyId: 1, status: 1 });
 
-// Compound index to ensure unique connections
+// Compound index to ensure unique connections (this also serves as a query index)
 connectionSchema.index(
   { tenantId: 1, landlordId: 1, propertyId: 1 }, 
   { unique: true }

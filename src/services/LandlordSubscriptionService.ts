@@ -79,6 +79,19 @@ export class LandlordSubscriptionService {
         status: "collected" // In-app payment is immediately collected
       });
 
+      // Add to escrow (100% to Khayalami, 0% to landlord for subscription payments)
+      const { escrowService } = await import("./EscrowService");
+      await escrowService.addToEscrow(payment, {
+        deductions: {
+          subscriptionFee: 0,
+          processingFee: 0,
+          insurancePremium: 0
+        },
+        revenueSourceIds: [revenueSource._id.toString()]
+      });
+      // Update status to "held" since payment is verified
+      await escrowService.updateEscrowStatus(payment._id.toString(), "held");
+
       // Update landlord preferences
       const preferences = await LandlordPreferences.findOne({ landlordId: data.landlordId });
       if (!preferences) {
@@ -212,6 +225,19 @@ export class LandlordSubscriptionService {
       description: `Landlord premium subscription - ${planType}`,
       notes: `Monthly subscription for premium features`
     });
+
+    // Add to escrow (100% to Khayalami, 0% to landlord for subscription payments)
+    const { escrowService } = await import("./EscrowService");
+    await escrowService.addToEscrow(payment, {
+      deductions: {
+        subscriptionFee: 0,
+        processingFee: 0,
+        insurancePremium: 0
+      },
+      revenueSourceIds: [revenueSource._id.toString()]
+    });
+    // Update status to "held" since payment is verified
+    await escrowService.updateEscrowStatus(payment._id.toString(), "held");
 
     // Update landlord preferences
     const preferences = await LandlordPreferences.findOne({ 
@@ -475,6 +501,19 @@ export class LandlordSubscriptionService {
       notes: `Monthly subscription for zero deposit protection`
     });
 
+    // Add to escrow (100% to Khayalami, 0% to landlord for subscription payments)
+    const { escrowService } = await import("./EscrowService");
+    await escrowService.addToEscrow(payment, {
+      deductions: {
+        subscriptionFee: 0,
+        processingFee: 0,
+        insurancePremium: 0
+      },
+      revenueSourceIds: [revenueSource._id.toString()]
+    });
+    // Update status to "held" since payment is verified
+    await escrowService.updateEscrowStatus(payment._id.toString(), "held");
+
     // Update landlord preferences
     const preferences = await LandlordPreferences.findOne({ 
       landlordId: paymentRequest.landlordId 
@@ -564,4 +603,6 @@ export class LandlordSubscriptionService {
 }
 
 export const landlordSubscriptionService = new LandlordSubscriptionService();
+
+
 

@@ -177,11 +177,25 @@ export class EscrowService {
       { $group: { _id: null, total: { $sum: "$khayalamiAmount" } } }
     ]);
 
+    // Calculate total landlord payouts (all-time from Payout collection)
+    const totalLandlordPayouts = await Payout.aggregate([
+      { $match: { recipientType: "landlord" } },
+      { $group: { _id: null, total: { $sum: "$amount" } } }
+    ]);
+
+    // Calculate total Khayalami payouts (all-time from Payout collection)
+    const totalKhayalamiPayouts = await Payout.aggregate([
+      { $match: { recipientType: "khayalami" } },
+      { $group: { _id: null, total: { $sum: "$amount" } } }
+    ]);
+
     return {
       account,
       totalHeld,
       pendingLandlordPayouts: pendingLandlordPayouts[0]?.total || 0,
       pendingKhayalamiPayouts: pendingKhayalamiPayouts[0]?.total || 0,
+      totalLandlordPayouts: totalLandlordPayouts[0]?.total || 0,
+      totalKhayalamiPayouts: totalKhayalamiPayouts[0]?.total || 0,
       transactionCounts: {
         pending: pendingCount,
         held: heldCount,
@@ -282,11 +296,25 @@ export class EscrowService {
       if (filters.endDate) query.createdAt.$lte = filters.endDate;
     }
 
-    return await EscrowTransaction.find(query)
-      .populate("landlordId", "firstName lastName email")
-      .populate("tenantId", "firstName lastName email")
-      .populate("propertyId", "title address")
+    // Use lean() and manual populate to avoid filtering out transactions with null references
+    const transactions = await EscrowTransaction.find(query)
       .sort({ createdAt: 1 }); // Oldest first
+    
+    // Populate fields only if they exist (to avoid filtering out transactions)
+    // Note: populate won't filter, but we'll populate manually for safety
+    for (const transaction of transactions) {
+      if (transaction.landlordId) {
+        await transaction.populate("landlordId", "firstName lastName email");
+      }
+      if (transaction.tenantId) {
+        await transaction.populate("tenantId", "firstName lastName email");
+      }
+      if (transaction.propertyId) {
+        await transaction.populate("propertyId", "title address");
+      }
+    }
+    
+    return transactions;
   }
 
   /**
@@ -330,6 +358,12 @@ export class EscrowService {
         ?? (transaction.landlordId as any)?.toString?.() 
         ?? transaction.landlordId?.toString?.();
       
+      // Skip transactions with invalid landlordId
+      if (!landlordId || landlordId === 'undefined' || landlordId === 'null') {
+        console.warn(`⚠️  Skipping transaction ${transaction._id} - invalid landlordId: ${transaction.landlordId}`);
+        continue;
+      }
+      
       if (!landlordGroups.has(landlordId)) {
         landlordGroups.set(landlordId, []);
       }
@@ -344,12 +378,27 @@ export class EscrowService {
 
     // Create payouts for each landlord
     for (const [landlordId, transactions] of landlordGroups.entries()) {
+      // Skip if landlordId is invalid
+      if (!landlordId || landlordId === 'undefined' || landlordId === 'null') {
+        console.warn(`⚠️  Skipping transactions with invalid landlordId: ${transactions.length} transaction(s)`);
+        continue;
+      }
+
       let totalAmount = transactions.reduce((sum, t) => sum + t.landlordAmount, 0);
+      
+      // Skip if total amount is 0 (no payout needed)
+      if (totalAmount <= 0) {
+        console.log(`ℹ️  Skipping landlord ${landlordId} - total amount is 0`);
+        continue;
+      }
+      
       const escrowTransactionIds = transactions.map(t => t._id);
 
-      // Get landlord details for payout
+      // Get landlord details for payout (for email notification - not required for payout creation)
       const landlord = await User.findById(landlordId);
-      if (!landlord) continue;
+      if (!landlord) {
+        console.warn(`⚠️  Landlord user not found for ID ${landlordId}, but creating payout anyway`);
+      }
 
       // Check landlord subscription payment method
       const preferences = await LandlordPreferences.findOne({ 
@@ -488,20 +537,24 @@ export class EscrowService {
       );
       await balanceToUpdate.save();
 
-      // Send email notification to landlord
-      try {
-        await emailNotificationService.sendDistributionPayout({
-          landlordEmail: landlord.email,
-          landlordName: `${landlord.firstName} ${landlord.lastName}`,
-          amount: totalAmount,
-          transactionCount: transactions.length,
-          subscriptionFee: subscriptionFee > 0 ? subscriptionFee : undefined,
-          payoutId: landlordPayout._id.toString()
-        });
-        console.log(`✅ Sent distribution email to landlord ${landlord.email}`);
-      } catch (emailError: any) {
-        console.error(`⚠️  Failed to send email to landlord ${landlord.email}:`, emailError.message);
-        // Don't fail distribution if email fails
+      // Send email notification to landlord (only if landlord exists)
+      if (landlord) {
+        try {
+          await emailNotificationService.sendDistributionPayout({
+            landlordEmail: landlord.email,
+            landlordName: `${landlord.firstName} ${landlord.lastName}`,
+            amount: totalAmount,
+            transactionCount: transactions.length,
+            subscriptionFee: subscriptionFee > 0 ? subscriptionFee : undefined,
+            payoutId: landlordPayout._id.toString()
+          });
+          console.log(`✅ Sent distribution email to landlord ${landlord.email}`);
+        } catch (emailError: any) {
+          console.error(`⚠️  Failed to send email to landlord ${landlord.email}:`, emailError.message);
+          // Don't fail distribution if email fails
+        }
+      } else {
+        console.log(`⚠️  Skipped email notification for landlord ${landlordId} - user not found`);
       }
 
       totalDistributed += totalAmount;
@@ -637,4 +690,5 @@ export class EscrowService {
 }
 
 export const escrowService = new EscrowService();
+
 

@@ -11,7 +11,7 @@ export class DistributionController {
    */
   async manualDistribution(req: Request, res: Response): Promise<void> {
     try {
-      const userId = (req as any).user?.userId;
+      const userId = (req as any).user?._id?.toString() || (req as any).user?._id || (req as any).user?.id || (req as any).user?.userId;
       if (!userId) {
         res.status(401).json({ success: false, message: "Unauthorized" });
         return;

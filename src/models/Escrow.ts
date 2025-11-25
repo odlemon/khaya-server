@@ -74,17 +74,17 @@ const escrowTransactionSchema = new Schema<IEscrowTransaction>({
   rentalId: {
     type: Schema.Types.ObjectId,
     ref: "Rental",
-    required: true
+    required: false // Optional - not all payments have rentals (e.g., subscriptions, boosts)
   },
   agreementId: {
     type: Schema.Types.ObjectId,
     ref: "Agreement",
-    required: true
+    required: false // Optional - not all payments have agreements (e.g., subscriptions, boosts)
   },
   propertyId: {
     type: Schema.Types.ObjectId,
     ref: "Property",
-    required: true
+    required: false // Optional - not all payments have properties (e.g., account-level subscriptions)
   },
   
   // Parties involved
@@ -203,12 +203,6 @@ const escrowTransactionSchema = new Schema<IEscrowTransaction>({
     ref: "RevenueSource"
   }],
   
-  // Revenue source tracking
-  revenueSourceIds: [{
-    type: Schema.Types.ObjectId,
-    ref: "RevenueSource"
-  }],
-  
   // Metadata
   receiptNumber: {
     type: String
@@ -221,14 +215,15 @@ const escrowTransactionSchema = new Schema<IEscrowTransaction>({
 });
 
 // Indexes for efficient queries
+// Note: paymentId already has unique: true, so no need for separate index
 escrowTransactionSchema.index({ landlordId: 1, status: 1 });
 escrowTransactionSchema.index({ tenantId: 1, status: 1 });
 escrowTransactionSchema.index({ status: 1, createdAt: 1 });
-escrowTransactionSchema.index({ paymentId: 1 });
 escrowTransactionSchema.index({ rentalId: 1 });
 escrowTransactionSchema.index({ distributedAt: 1 });
 escrowTransactionSchema.index({ landlordPayoutStatus: 1 });
 escrowTransactionSchema.index({ khayalamiPayoutStatus: 1 });
+// Note: agreementId and landlordId are part of compound indexes above, so no separate indexes needed
 
 export const EscrowTransaction: Model<IEscrowTransaction> = mongoose.model<IEscrowTransaction>(
   "EscrowTransaction",
@@ -502,4 +497,5 @@ payoutSchema.index({ distributionBatchId: 1 });
 payoutSchema.index({ payoutType: 1 });
 
 export const Payout: Model<IPayout> = mongoose.model<IPayout>("Payout", payoutSchema);
+
 
