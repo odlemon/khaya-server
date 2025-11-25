@@ -5,23 +5,168 @@ import { agreementService, CreateAgreementData, SignatureData } from "../service
 export class AgreementController {
 
   /**
-   * Create a new agreement (landlord only)
+   * Get connected landlords and tenants for agreement creation (admin only)
+   * Returns structured data for frontend selection
+   */
+  async getConnectedParties(req: Request, res: Response, next: NextFunction) {
+    try {
+      const userRole = (req as any).user.role;
+
+      if (userRole !== "admin") {
+        return res.status(403).json({ 
+          success: false, 
+          message: "Only admins can access this endpoint" 
+        });
+      }
+
+      const { Connection } = await import("../models/Connection");
+      const { User } = await import("../models/User");
+      const { Property } = await import("../models/Property");
+      const { Types } = await import("mongoose");
+
+      // Get all accepted connections
+      const connections = await Connection.find({
+        status: "accepted",
+        isActive: true
+      })
+        .populate("landlordId", "firstName lastName email phone")
+        .populate("tenantId", "firstName lastName email phone")
+        .populate("propertyId", "title address")
+        .sort({ createdAt: -1 });
+
+      // Structure data: Group by landlord -> property -> tenants
+      const structuredData: any = {
+        landlords: [],
+        tenants: [],
+        connections: []
+      };
+
+      // Map to track unique landlords and tenants
+      const landlordMap = new Map();
+      const tenantMap = new Map();
+      const propertyMap = new Map();
+
+      connections.forEach((conn: any) => {
+        const landlord = conn.landlordId;
+        const tenant = conn.tenantId;
+        const property = conn.propertyId;
+
+        if (!landlord || !tenant || !property) return;
+
+        const landlordId = landlord._id.toString();
+        const tenantId = tenant._id.toString();
+        const propertyId = property._id.toString();
+
+        // Add landlord if not exists
+        if (!landlordMap.has(landlordId)) {
+          landlordMap.set(landlordId, {
+            id: landlordId,
+            firstName: landlord.firstName,
+            lastName: landlord.lastName,
+            fullName: `${landlord.firstName} ${landlord.lastName}`,
+            email: landlord.email,
+            phone: landlord.phone,
+            properties: []
+          });
+        }
+
+        // Add tenant if not exists
+        if (!tenantMap.has(tenantId)) {
+          tenantMap.set(tenantId, {
+            id: tenantId,
+            firstName: tenant.firstName,
+            lastName: tenant.lastName,
+            fullName: `${tenant.firstName} ${tenant.lastName}`,
+            email: tenant.email,
+            phone: tenant.phone
+          });
+        }
+
+        // Add property to landlord if not exists
+        const landlordData = landlordMap.get(landlordId);
+        if (!propertyMap.has(`${landlordId}-${propertyId}`)) {
+          propertyMap.set(`${landlordId}-${propertyId}`, true);
+          landlordData.properties.push({
+            id: propertyId,
+            title: property.title || "Untitled Property",
+            address: property.address || "No address",
+            tenants: []
+          });
+        }
+
+        // Add tenant to property
+        const propertyData = landlordData.properties.find((p: any) => p.id === propertyId);
+        if (propertyData && !propertyData.tenants.find((t: any) => t.id === tenantId)) {
+          propertyData.tenants.push({
+            id: tenantId,
+            firstName: tenant.firstName,
+            lastName: tenant.lastName,
+            fullName: `${tenant.firstName} ${tenant.lastName}`,
+            email: tenant.email,
+            phone: tenant.phone
+          });
+        }
+
+        // Add connection entry
+        structuredData.connections.push({
+          connectionId: conn._id.toString(),
+          landlordId: landlordId,
+          landlordName: `${landlord.firstName} ${landlord.lastName}`,
+          tenantId: tenantId,
+          tenantName: `${tenant.firstName} ${tenant.lastName}`,
+          propertyId: propertyId,
+          propertyTitle: property.title || "Untitled Property",
+          connectedAt: conn.createdAt
+        });
+      });
+
+      // Convert maps to arrays
+      structuredData.landlords = Array.from(landlordMap.values());
+      structuredData.tenants = Array.from(tenantMap.values());
+
+      res.status(200).json({
+        success: true,
+        message: "Connected parties retrieved successfully",
+        data: structuredData
+      });
+    } catch (error: any) {
+      next(error);
+    }
+  }
+
+  /**
+   * Create a new agreement (admin only)
    */
   async createAgreement(req: Request, res: Response, next: NextFunction) {
     try {
       const userId = (req as any).user._id;
       const userRole = (req as any).user.role;
 
-      if (userRole !== "landlord") {
+      if (userRole !== "admin") {
         return res.status(403).json({ 
           success: false, 
-          message: "Only landlords can create agreements" 
+          message: "Only admins can create agreements" 
+        });
+      }
+
+      // Admin creates agreement, but landlordId and tenantId must be provided in body
+      if (!req.body.landlordId) {
+        return res.status(400).json({
+          success: false,
+          message: "landlordId is required"
+        });
+      }
+
+      if (!req.body.tenantId) {
+        return res.status(400).json({
+          success: false,
+          message: "tenantId is required"
         });
       }
 
       const agreementData: CreateAgreementData = {
         ...req.body,
-        landlordId: userId
+        // landlordId and tenantId come from request body, not from admin user
       };
 
       // Validate agreement data
@@ -539,23 +684,38 @@ export class AgreementController {
   }
 
   /**
-   * Create agreement from template (landlord only)
+   * Create agreement from template (admin only)
    */
   async createAgreementFromTemplate(req: Request, res: Response, next: NextFunction) {
     try {
       const userId = (req as any).user._id;
       const userRole = (req as any).user.role;
 
-      if (userRole !== "landlord") {
+      if (userRole !== "admin") {
         return res.status(403).json({
           success: false,
-          message: "Only landlords can create agreements from templates"
+          message: "Only admins can create agreements from templates"
+        });
+      }
+
+      // Admin creates agreement, but landlordId and tenantId must be provided in body
+      if (!req.body.landlordId) {
+        return res.status(400).json({
+          success: false,
+          message: "landlordId is required"
+        });
+      }
+
+      if (!req.body.tenantId) {
+        return res.status(400).json({
+          success: false,
+          message: "tenantId is required"
         });
       }
 
       const agreementData = {
         ...req.body,
-        landlordId: userId
+        // landlordId and tenantId come from request body, not from admin user
       };
 
       const agreement = await agreementService.createAgreementFromTemplate(agreementData);
@@ -564,6 +724,79 @@ export class AgreementController {
         success: true,
         message: "Agreement created from template successfully",
         data: agreement
+      });
+    } catch (error: any) {
+      next(error);
+    }
+  }
+
+  /**
+   * Generate agreement Word document from template (admin only)
+   */
+  async generateAgreementWordDocument(req: Request, res: Response, next: NextFunction) {
+    try {
+      const userRole = (req as any).user.role;
+      
+      if (userRole !== "admin") {
+        return res.status(403).json({
+          success: false,
+          message: "Only admins can generate agreement documents"
+        });
+      }
+      
+      const { id } = req.params;
+      const { templatePath, outputPath } = req.body;
+      
+      const { agreementWordTemplateService } = await import("../services/AgreementWordTemplateService");
+      const { User } = await import("../models/User");
+      const { Property } = await import("../models/Property");
+      
+      // Get agreement with populated fields
+      const agreement = await agreementService.getAgreementById(id);
+      if (!agreement) {
+        return res.status(404).json({
+          success: false,
+          message: "Agreement not found"
+        });
+      }
+      
+      // Get landlord, tenant, and property
+      const landlord = await User.findById(agreement.landlordId);
+      const tenant = await User.findById(agreement.tenantId);
+      const property = await Property.findById(agreement.propertyId);
+      
+      if (!landlord || !tenant || !property) {
+        return res.status(404).json({
+          success: false,
+          message: "Landlord, tenant, or property not found"
+        });
+      }
+      
+      // Generate document
+      const { buffer, filePath } = await agreementWordTemplateService.generateAndSave(
+        agreement,
+        landlord,
+        tenant,
+        property,
+        templatePath,
+        outputPath
+      );
+      
+      // Return file or send as download
+      if (req.query.download === 'true') {
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+        res.setHeader('Content-Disposition', `attachment; filename="agreement-${id}.docx"`);
+        return res.send(buffer);
+      }
+      
+      res.status(200).json({
+        success: true,
+        message: "Agreement document generated successfully",
+        data: {
+          agreementId: id,
+          filePath: filePath,
+          downloadUrl: `/api/agreements/${id}/document/download`
+        }
       });
     } catch (error: any) {
       next(error);
@@ -683,6 +916,50 @@ export class AgreementController {
       res.json({
         success: true,
         data: agreements
+      });
+    } catch (error: any) {
+      next(error);
+    }
+  }
+
+  /**
+   * Pay agreement fee online (tenant only)
+   */
+  async payAgreementFee(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { id: agreementId } = req.params;
+      const userId = (req as any).user._id;
+      const userRole = (req as any).user.role;
+
+      // Only tenants can pay agreement fees
+      if (userRole !== "tenant") {
+        return res.status(403).json({
+          success: false,
+          message: "Only tenants can pay agreement fees"
+        });
+      }
+
+      const { amount, gatewayResponse, notes } = req.body;
+
+      // Validate required fields
+      if (!amount || amount <= 0) {
+        return res.status(400).json({
+          success: false,
+          message: "Valid payment amount is required"
+        });
+      }
+
+      // gatewayResponse is now optional for testing
+      const result = await agreementService.payAgreementFeeOnline(agreementId, userId.toString(), {
+        amount,
+        gatewayResponse, // Optional
+        notes
+      });
+
+      res.status(200).json({
+        success: true,
+        message: "Agreement fee paid successfully",
+        data: result
       });
     } catch (error: any) {
       next(error);

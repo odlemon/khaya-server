@@ -30,7 +30,9 @@ export interface IAgreement extends Document {
   tenantSignature?: {
     signedAt: Date;
     signatureData: string;
+    signatureUrl?: string;
     ipAddress: string;
+    paymentStatus?: "pending_payment" | "payment_approved" | "verified"; // Status of payment for this signature
   };
   
   // Documents
@@ -79,6 +81,27 @@ export interface IAgreement extends Document {
     requestedAt: Date;
   };
   
+  // Extended Template Fields
+  agreementDate?: Date; // Date when agreement is executed
+  earlyPaymentRentalAmount?: number; // Discounted rental if paid early
+  utilityDepositAmount?: number; // Deposit for utilities
+  securityDepositMonths?: number; // Number of months as security deposit (default: 2)
+  renewalOptionPeriod?: string; // e.g., "One year only"
+  renewalNoticePeriod?: string; // e.g., "Two (2) months"
+  propertyUsePurpose?: string; // e.g., "Residential Purpose Only"
+  minorRepairsLimit?: number; // Maximum tenant responsible for minor repairs
+  cleaningFee?: number; // Fee if property not returned properly
+  latePaymentInterestRate?: number; // Annual interest rate for late payments
+  landlordTerminationNotice?: string; // e.g., "1 month"
+  inventoryAddress?: string; // Address for inventory list
+  inventoryItems?: Array<{
+    item: string;
+    quantity: string;
+  }>; // List of furniture/fixtures
+  witnessName?: string; // Witness name
+  witnessSignature?: string; // Witness signature URL
+  witnessId?: string; // Witness ID number
+  
   // Timestamps
   createdAt: Date;
   updatedAt: Date;
@@ -126,7 +149,12 @@ const agreementSchema = new Schema<IAgreement>({
   tenantSignature: {
     signedAt: { type: Date },
     signatureUrl: { type: String }, // URL to signature image
-    ipAddress: { type: String }
+    ipAddress: { type: String },
+    paymentStatus: { 
+      type: String, 
+      enum: ["no_payment", "pending_payment", "payment_approved", "verified"]
+      // No default - must be explicitly set when tenant signs
+    }
   },
   
   // Documents
@@ -177,7 +205,28 @@ const agreementSchema = new Schema<IAgreement>({
   
   // Termination tracking
   terminatedAt: { type: Date },
-  terminatedBy: { type: Schema.Types.ObjectId, ref: "User" }
+  terminatedBy: { type: Schema.Types.ObjectId, ref: "User" },
+  
+  // Extended Template Fields
+  agreementDate: { type: Date },
+  earlyPaymentRentalAmount: { type: Number },
+  utilityDepositAmount: { type: Number, default: 0 },
+  securityDepositMonths: { type: Number, default: 2 },
+  renewalOptionPeriod: { type: String, default: "One year only" },
+  renewalNoticePeriod: { type: String, default: "Two (2) months" },
+  propertyUsePurpose: { type: String, default: "Residential Purpose Only" },
+  minorRepairsLimit: { type: Number, default: 20.00 },
+  cleaningFee: { type: Number },
+  latePaymentInterestRate: { type: Number, default: 10 },
+  landlordTerminationNotice: { type: String, default: "1 month" },
+  inventoryAddress: { type: String },
+  inventoryItems: [{
+    item: { type: String, required: true },
+    quantity: { type: String, required: true }
+  }],
+  witnessName: { type: String },
+  witnessSignature: { type: String },
+  witnessId: { type: String }
 }, { 
   timestamps: true 
 });

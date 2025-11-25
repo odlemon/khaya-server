@@ -53,6 +53,8 @@ export interface IProperty extends Document {
   internetAvailable: boolean;
   parkingAvailable: boolean;
   parkingSpaces: number;
+  parkingAllocation?: string; // e.g., "2 parking bays: B-05-01, B-05-02"
+  accessCode?: string; // e.g., "Building code: 1234#"
   
   // Landlord Settings
   khayalamiAgentAssistance: boolean;
@@ -146,6 +148,8 @@ const propertySchema = new Schema<IProperty>(
     internetAvailable: { type: Boolean, default: false },
     parkingAvailable: { type: Boolean, default: false },
     parkingSpaces: { type: Number, default: 0 },
+    parkingAllocation: { type: String },
+    accessCode: { type: String },
     
     // Landlord Settings
     khayalamiAgentAssistance: { type: Boolean, default: false },

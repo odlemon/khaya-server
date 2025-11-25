@@ -9,6 +9,12 @@ const router = express.Router();
 // All agreement routes require authentication
 router.use(authenticate);
 
+// Get connected landlords and tenants for agreement creation (admin only)
+router.get("/connected-parties", 
+  authorize(["admin"]), 
+  (req, res, next) => agreementController.getConnectedParties(req, res, next)
+);
+
 // Get agreement templates (public for authenticated users)
 router.get("/templates", (req, res, next) => agreementController.getAgreementTemplates(req, res, next));
 router.get("/templates/:id", (req, res, next) => agreementController.getAgreementTemplate(req, res, next));
@@ -37,21 +43,33 @@ router.get("/:id", (req, res, next) => agreementController.getAgreementById(req,
 // Generate agreement PDF
 router.get("/:id/pdf", (req, res, next) => agreementController.generateAgreementPDF(req, res, next));
 
+// Generate agreement Word document from template (admin only)
+router.post("/:id/generate-word", 
+  authorize(["admin"]), 
+  (req, res, next) => agreementController.generateAgreementWordDocument(req, res, next)
+);
+
+// Download generated agreement Word document
+router.get("/:id/document/download", 
+  authorize(["admin", "landlord", "tenant"]), 
+  (req, res, next) => agreementController.generateAgreementWordDocument(req, res, next)
+);
+
 // Get agreement signatures
 router.get("/:id/signatures", (req, res, next) => agreementController.getAgreementSignatures(req, res, next));
 
 // Get agreement audit trail
 router.get("/:id/audit-trail", (req, res, next) => agreementController.getAgreementAuditTrail(req, res, next));
 
-// Create new agreement (landlord only)
+// Create new agreement (admin only)
 router.post("/", 
-  authorize(["landlord"]), 
+  authorize(["admin"]), 
   (req, res, next) => agreementController.createAgreement(req, res, next)
 );
 
-// Create agreement from template (landlord only)
+// Create agreement from template (admin only)
 router.post("/from-template", 
-  authorize(["landlord"]), 
+  authorize(["admin"]), 
   (req, res, next) => agreementController.createAgreementFromTemplate(req, res, next)
 );
 
@@ -81,6 +99,12 @@ router.post("/:id/activate",
 
 // Sign agreement (both landlord and tenant)
 router.post("/:id/sign", (req, res, next) => agreementController.signAgreement(req, res, next));
+
+// Pay agreement fee online (tenant only)
+router.post("/:id/pay-fee", 
+  authorize(["tenant"]), 
+  (req, res, next) => agreementController.payAgreementFee(req, res, next)
+);
 
 // Request termination (Step 1: Either party requests termination)
 router.post("/:id/request-termination", (req, res, next) => agreementController.requestTermination(req, res, next));

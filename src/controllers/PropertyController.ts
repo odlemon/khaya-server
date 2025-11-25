@@ -4,6 +4,7 @@ import { Property } from "../models/Property";
 import { User } from "../models/User";
 import { Connection } from "../models/Connection";
 import { DocumentVerificationService } from "../services/DocumentVerificationService";
+import { RevenueSource } from "../models/RevenueSource";
 import { Types } from "mongoose";
 
 export class PropertyController {
@@ -747,6 +748,137 @@ export class PropertyController {
           connectionStatus,
           isConnected: !!connection,
           canChat: connection?.status === "accepted" && connection?.isActive
+        }
+      });
+    } catch (error: any) {
+      next(error);
+    }
+  }
+
+  /**
+   * Get boost history for all landlord properties
+   * GET /api/properties/boosts/history
+   */
+  async getAllBoostsHistory(req: Request, res: Response, next: NextFunction) {
+    try {
+      const userId = (req as any).user?._id || (req as any).user?.id;
+      const userRole = (req as any).user?.role;
+
+      if (userRole !== "landlord" && userRole !== "admin") {
+        return res.status(403).json({
+          success: false,
+          message: "Access denied. Landlord or admin role required."
+        });
+      }
+
+      // Get all premium boost revenue sources for this landlord
+      const query: any = {
+        sourceType: "premium_boost",
+        payerId: userId
+      };
+
+      // If admin, allow filtering by landlordId
+      if (userRole === "admin" && req.query.landlordId) {
+        query.payerId = req.query.landlordId;
+      }
+
+      const boosts = await RevenueSource.find(query)
+        .sort({ createdAt: -1 })
+        .populate("propertyId", "title address")
+        .populate("payerId", "firstName lastName email")
+        .lean();
+
+      // Group by property
+      const boostsByProperty = boosts.reduce((acc: any, boost: any) => {
+        const propId = boost.propertyId?._id?.toString() || "unknown";
+        if (!acc[propId]) {
+          acc[propId] = {
+            property: boost.propertyId,
+            boosts: [],
+            totalSpent: 0
+          };
+        }
+        acc[propId].boosts.push(boost);
+        acc[propId].totalSpent += boost.amount;
+        return acc;
+      }, {});
+
+      // Calculate summary
+      const totalSpent = boosts.reduce((sum: number, boost: any) => sum + boost.amount, 0);
+      const activeBoosts = boosts.filter((boost: any) => boost.status === "collected");
+      const expiredBoosts = boosts.filter((boost: any) => boost.status === "distributed");
+
+      res.json({
+        success: true,
+        data: {
+          boosts,
+          boostsByProperty: Object.values(boostsByProperty),
+          summary: {
+            total: boosts.length,
+            totalSpent,
+            active: activeBoosts.length,
+            expired: expiredBoosts.length,
+            properties: Object.keys(boostsByProperty).length
+          }
+        }
+      });
+    } catch (error: any) {
+      next(error);
+    }
+  }
+
+  /**
+   * Get boost history for a specific property
+   * GET /api/properties/:propertyId/boosts/history
+   */
+  async getBoostHistory(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { propertyId } = req.params;
+      const userId = (req as any).user?._id || (req as any).user?.id;
+      const userRole = (req as any).user?.role;
+
+      // Verify property exists and user has access
+      const property = await Property.findById(propertyId);
+      if (!property) {
+        return res.status(404).json({
+          success: false,
+          message: "Property not found"
+        });
+      }
+
+      // Check if user is the landlord or admin
+      if (userRole !== "admin" && property.landlordId.toString() !== userId?.toString()) {
+        return res.status(403).json({
+          success: false,
+          message: "Access denied"
+        });
+      }
+
+      // Get all premium boost revenue sources for this property
+      const boosts = await RevenueSource.find({
+        sourceType: "premium_boost",
+        propertyId: propertyId,
+        payerId: property.landlordId
+      })
+        .sort({ createdAt: -1 })
+        .populate("propertyId", "title address")
+        .lean();
+
+      // Calculate summary
+      const totalSpent = boosts.reduce((sum: number, boost: any) => sum + boost.amount, 0);
+      const activeBoosts = boosts.filter((boost: any) => boost.status === "collected");
+      const expiredBoosts = boosts.filter((boost: any) => boost.status === "distributed");
+
+      res.json({
+        success: true,
+        data: {
+          boosts,
+          summary: {
+            total: boosts.length,
+            totalSpent,
+            active: activeBoosts.length,
+            expired: expiredBoosts.length
+          }
         }
       });
     } catch (error: any) {

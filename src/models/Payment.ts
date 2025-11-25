@@ -2,9 +2,9 @@
 import mongoose, { Document, Schema, Model } from "mongoose";
 
 export interface IPayment extends Document {
-  rentalId: mongoose.Types.ObjectId;
-  agreementId: mongoose.Types.ObjectId;
-  propertyId: mongoose.Types.ObjectId;
+  rentalId?: mongoose.Types.ObjectId; // Optional - not needed for subscriptions/boosts
+  agreementId?: mongoose.Types.ObjectId; // Optional - not needed for subscriptions/boosts
+  propertyId?: mongoose.Types.ObjectId; // Optional - not needed for subscriptions
   landlordId: mongoose.Types.ObjectId;
   tenantId: mongoose.Types.ObjectId;
   
@@ -15,7 +15,7 @@ export interface IPayment extends Document {
   amount: number;
   
   // Dates
-  dueDate: Date;
+  dueDate?: Date; // Optional - not needed for subscriptions/boosts
   paymentDate?: Date;
   verifiedAt?: Date;
   
@@ -66,17 +66,17 @@ const paymentSchema = new Schema<IPayment>({
   rentalId: { 
     type: Schema.Types.ObjectId, 
     ref: "Rental", 
-    required: true 
+    required: false // Optional - not needed for subscriptions/boosts
   },
   agreementId: { 
     type: Schema.Types.ObjectId, 
     ref: "Agreement", 
-    required: true 
+    required: false // Optional - not needed for subscriptions/boosts
   },
   propertyId: { 
     type: Schema.Types.ObjectId, 
     ref: "Property", 
-    required: true 
+    required: false // Optional - not needed for subscriptions
   },
   landlordId: { 
     type: Schema.Types.ObjectId, 
@@ -100,7 +100,7 @@ const paymentSchema = new Schema<IPayment>({
   amount: { type: Number, required: true },
   
   // Dates
-  dueDate: { type: Date, required: true },
+  dueDate: { type: Date, required: false }, // Optional - not needed for subscriptions/boosts
   paymentDate: { type: Date },
   verifiedAt: { type: Date },
   
@@ -166,8 +166,8 @@ paymentSchema.index({ paymentType: 1 });
 paymentSchema.pre('save', function(next) {
   const now = new Date();
   
-  // Calculate days late
-  if (this.dueDate < now && this.status === 'pending') {
+  // Calculate days late (only if dueDate exists - for rent payments)
+  if (this.dueDate && this.dueDate < now && this.status === 'pending') {
     this.status = 'overdue';
     const diffTime = Math.abs(now.getTime() - this.dueDate.getTime());
     this.daysLate = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
