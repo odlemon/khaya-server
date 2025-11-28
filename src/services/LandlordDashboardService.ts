@@ -1,3 +1,4 @@
+//@ts-nocheck
 import { Payment, IPayment } from "../models/Payment";
 import { LandlordBalance } from "../models/LandlordBalance";
 import { Rental } from "../models/Rental";

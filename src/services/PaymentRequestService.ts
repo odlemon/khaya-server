@@ -205,38 +205,124 @@ export class PaymentRequestService {
       throw new Error("Payment request is not pending approval");
     }
 
-    // Validate this is a rent payment request
-    if (!paymentRequest.rentalId) {
-      throw new Error("This payment request is not a rent payment. Use the appropriate approval method for subscriptions/boosts.");
-    }
+    let payment: IPayment;
+    if (paymentRequest.rentalId) {
+      // Calculate deductions
+      const deductions = await paymentCalculationService.calculateRentDeductions(
+        paymentRequest.amount,
+        paymentRequest.tenantId.toString(),
+        paymentRequest.landlordId.toString(),
+        paymentRequest.rentalId.toString()
+      );
 
-    // Calculate deductions
-    const deductions = await paymentCalculationService.calculateRentDeductions(
-      paymentRequest.amount,
-      paymentRequest.tenantId.toString(),
-      paymentRequest.landlordId.toString(),
-      paymentRequest.rentalId.toString()
-    );
+      // Create payment record
+      payment = await paymentService.createNewPayment(
+        paymentRequest.rentalId.toString(),
+        paymentRequest.tenantId.toString(),
+        {
+          amount: paymentRequest.amount,
+          paymentMethod: "cash", // External payments are treated as cash
+          paymentType: "rent",
+          proofOfPayment: paymentRequest.proofOfPayment,
+          notes: `External payment - ${paymentRequest.paymentMethod}. ${paymentRequest.notes || ""}`
+        }
+      );
 
-    // Create payment record
-    const payment = await paymentService.createNewPayment(
-      paymentRequest.rentalId.toString(),
-      paymentRequest.tenantId.toString(),
-      {
+      // Auto-verify the payment (admin approved)
+      await paymentService.verifyPayment(
+        payment._id.toString(),
+        paymentRequest.landlordId.toString(),
+        "Payment approved by admin after external deposit verification"
+      );
+    } else {
+      const revenueSourceData: any = {
+        sourceType: paymentRequest.requestType || "service",
         amount: paymentRequest.amount,
-        paymentMethod: "cash", // External payments are treated as cash
-        paymentType: "rent",
-        proofOfPayment: paymentRequest.proofOfPayment,
-        notes: `External payment - ${paymentRequest.paymentMethod}. ${paymentRequest.notes || ""}`
-      }
-    );
+        payerId: paymentRequest.tenantId.toString(),
+        recipientId: "khayalami",
+        paymentId: undefined,
+        rentalId: paymentRequest.rentalId?.toString(),
+        propertyId: paymentRequest.propertyId?.toString(),
+        agreementId: paymentRequest.agreementId?.toString(),
+        description: `External ${paymentRequest.requestType || "service"} payment`,
+        notes: paymentRequest.notes || "Approved by admin",
+        status: "collected"
+      };
 
-    // Auto-verify the payment (admin approved)
-    await paymentService.verifyPayment(
-      payment._id.toString(),
-      paymentRequest.landlordId.toString(),
-      "Payment approved by admin after external deposit verification"
-    );
+      payment = await Payment.create({
+        rentalId: paymentRequest.rentalId || undefined,
+        agreementId: paymentRequest.agreementId,
+        propertyId: paymentRequest.propertyId,
+        landlordId: paymentRequest.landlordId,
+        tenantId: paymentRequest.tenantId,
+        paymentType: "service",
+        amount: paymentRequest.amount,
+        totalAmount: paymentRequest.amount,
+        paymentMethod: paymentRequest.paymentMethod === "in_app" ? "in_app" : "cash",
+        paymentDate: new Date(),
+        dueDate: new Date(),
+        proofOfPayment: paymentRequest.proofOfPayment,
+        status: "verified",
+        verifiedAt: new Date(),
+        notes: paymentRequest.notes || "External service payment approved by admin"
+      });
+
+      const revenueSource = await revenueSourceService.createRevenueSource({
+        ...revenueSourceData,
+        paymentId: payment._id.toString()
+      });
+
+      await escrowService.addToEscrow(payment, {
+        deductions: {
+          subscriptionFee: 0,
+          processingFee: payment.totalAmount || payment.amount,
+          insurancePremium: 0
+        },
+        revenueSourceIds: [revenueSource._id.toString()]
+      });
+      await escrowService.updateEscrowStatus(payment._id.toString(), "held");
+
+      if (paymentRequest.requestType === "zero_deposit_protection") {
+        const { LandlordPreferences } = await import("../models/LandlordPreferences");
+        const preferences = await LandlordPreferences.findOne({ landlordId: paymentRequest.landlordId });
+        if (preferences) {
+          if (!preferences.zeroDepositProtection) {
+            preferences.zeroDepositProtection = {
+              isSubscribed: false,
+              autoRenew: true,
+              price: 0,
+              coverageAmount: 0
+            };
+          }
+          const protection = preferences.zeroDepositProtection;
+          const start = protection.startDate || new Date();
+          protection.isSubscribed = true;
+          protection.autoRenew = true;
+          protection.startDate = start;
+          const endDate = new Date(start);
+          endDate.setMonth(endDate.getMonth() + 1);
+          protection.endDate = endDate;
+          protection.nextBillingDate = new Date(endDate);
+          protection.price = paymentRequest.amount;
+          protection.coverageAmount = 500;
+          await preferences.save();
+        }
+      }
+
+      if (paymentRequest.agreementId) {
+        const { Agreement } = await import("../models/Agreement");
+        const agreement = await Agreement.findById(paymentRequest.agreementId);
+        if (agreement) {
+          if (!agreement.tenantSignature) {
+            agreement.tenantSignature = { paymentStatus: "verified" } as any;
+          } else {
+            agreement.tenantSignature.paymentStatus = "verified";
+          }
+          agreement.tenantSignature.paymentStatus = "verified";
+          await agreement.save();
+        }
+      }
+    }
 
     // Get escrow transaction
     const escrowTransaction = await escrowService.getEscrowSummary();
@@ -297,4 +383,7 @@ export class PaymentRequestService {
 }
 
 export const paymentRequestService = new PaymentRequestService();
+
+
+
 

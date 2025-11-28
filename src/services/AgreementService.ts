@@ -350,6 +350,9 @@ export class AgreementService {
         agreement.tenantSignature.paymentStatus = correctPaymentStatus;
         await agreement.save();
       }
+
+      // Keep the computed status for the response
+      agreement.set("computedTenantPaymentStatus", correctPaymentStatus);
     }
 
     // Generate formatted rental agreement template
@@ -359,8 +362,18 @@ export class AgreementService {
       console.log('📝 Generated formatted agreement length:', formattedAgreement.length);
       
       // Convert Mongoose document to plain object and add formatted agreement
-      const agreementObj = agreement.toObject();
+      const agreementObj: any = agreement.toObject();
       agreementObj.formattedAgreement = formattedAgreement;
+      agreementObj.paymentStatus = agreement.get("computedTenantPaymentStatus") ||
+        agreementObj.tenantSignature?.paymentStatus ||
+        "no_payment";
+      if (!agreementObj.tenantSignature) {
+        agreementObj.tenantSignature = {
+          paymentStatus: agreementObj.paymentStatus
+        };
+      } else if (!agreementObj.tenantSignature.paymentStatus) {
+        agreementObj.tenantSignature.paymentStatus = agreementObj.paymentStatus;
+      }
       
       console.log('✅ Formatted agreement added to response for agreement:', agreement._id);
       console.log('🔍 Agreement object keys after adding formattedAgreement:', Object.keys(agreementObj));

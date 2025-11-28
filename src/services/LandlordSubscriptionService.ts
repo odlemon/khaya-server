@@ -84,7 +84,7 @@ export class LandlordSubscriptionService {
       await escrowService.addToEscrow(payment, {
         deductions: {
           subscriptionFee: 0,
-          processingFee: 0,
+          processingFee: amount,
           insurancePremium: 0
         },
         revenueSourceIds: [revenueSource._id.toString()]
@@ -231,7 +231,7 @@ export class LandlordSubscriptionService {
     await escrowService.addToEscrow(payment, {
       deductions: {
         subscriptionFee: 0,
-        processingFee: 0,
+        processingFee: paymentRequest.amount,
         insurancePremium: 0
       },
       revenueSourceIds: [revenueSource._id.toString()]

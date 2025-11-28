@@ -3,8 +3,10 @@ import { Request, Response, NextFunction } from "express";
 import { Property } from "../models/Property";
 import { User } from "../models/User";
 import { Connection } from "../models/Connection";
-import { DocumentVerificationService } from "../services/DocumentVerificationService";
 import { RevenueSource } from "../models/RevenueSource";
+import { PaymentRequest } from "../models/PaymentRequest";
+import { LandlordPreferences } from "../models/LandlordPreferences";
+import { landlordSubscriptionService } from "../services/LandlordSubscriptionService";
 import { Types } from "mongoose";
 
 export class PropertyController {
@@ -24,18 +26,6 @@ export class PropertyController {
           success: false, 
           message: "Only landlords can create property listings" 
         });
-      }
-
-      // Check if landlord is document verified (only for landlords, not admins)
-      if (user.role === "landlord") {
-        const isDocumentVerified = await DocumentVerificationService.isUserDocumentVerified(userId);
-        if (!isDocumentVerified) {
-          return res.status(403).json({
-            success: false,
-            message: "You must complete document verification before creating property listings. Please upload and verify your documents first.",
-            requiresDocumentVerification: true
-          });
-        }
       }
 
       const propertyData = {
@@ -153,7 +143,90 @@ export class PropertyController {
         .skip(skip)
         .limit(Number(limit));
 
+      // ✨ Fetch active premium boosts for all properties
+      const propertyIds = properties.map(p => p._id);
+      const now = new Date();
       
+      // Get all active premium boosts (status: "collected", not expired)
+      const activeBoosts = await RevenueSource.find({
+        sourceType: "premium_boost",
+        status: "collected",
+        propertyId: { $in: propertyIds }
+      }).populate("propertyId");
+      
+      // Get PaymentRequests to find boost duration
+      const boostPaymentRequests = await PaymentRequest.find({
+        requestType: "premium_boost",
+        propertyId: { $in: propertyIds },
+        status: { $in: ["approved", "processed"] }
+      });
+      
+      // Create a map of propertyId -> boost info (duration from PaymentRequest or inferred from amount)
+      const boostMap = new Map();
+      const durationFromAmount = (amount: number): number => {
+        if (amount === 10) return 7;
+        if (amount === 15) return 30;
+        if (amount === 25) return 90;
+        return 30; // default
+      };
+      
+      for (const boost of activeBoosts) {
+        if (!boost.propertyId) continue;
+        const propId = boost.propertyId.toString();
+        
+        // Find duration from PaymentRequest
+        let duration = 30; // default
+        const paymentRequest = boostPaymentRequests.find(
+          pr => pr.propertyId?.toString() === propId && 
+          pr.propertyId?.toString() === boost.propertyId.toString()
+        );
+        
+        if (paymentRequest?.notes) {
+          // Try to extract duration from notes (format: "duration:30" or similar)
+          const durationMatch = paymentRequest.notes.match(/duration[:\s]+(\d+)/i);
+          if (durationMatch) {
+            duration = parseInt(durationMatch[1]);
+          }
+        }
+        
+        // If no duration in PaymentRequest, infer from amount
+        if (duration === 30 && boost.amount) {
+          duration = durationFromAmount(boost.amount);
+        }
+        
+        // Calculate expiration date
+        const boostStartDate = boost.createdAt || boost.updatedAt || now;
+        const boostExpiresAt = new Date(boostStartDate);
+        boostExpiresAt.setDate(boostExpiresAt.getDate() + duration);
+        
+        // Check if boost is still active
+        if (boostExpiresAt > now) {
+          boostMap.set(propId, {
+            isFeatured: true,
+            boostExpiresAt: boostExpiresAt.toISOString(),
+            boostStartedAt: boostStartDate.toISOString(),
+            duration: duration
+          });
+        }
+      }
+      
+      // ✨ Fetch zero deposit protection subscription status for all landlords
+      const landlordIds = [...new Set(properties.map(p => {
+        const landlordId = p.landlordId?._id?.toString() || p.landlordId?.toString();
+        return landlordId;
+      }).filter(Boolean))];
+      const zeroDepositMap = new Map();
+      
+      for (const landlordId of landlordIds) {
+        if (!landlordId) continue;
+        try {
+          const zeroDepositStatus = await landlordSubscriptionService.getZeroDepositProtectionStatus(landlordId);
+          zeroDepositMap.set(landlordId, zeroDepositStatus.isSubscribed);
+        } catch (error) {
+          // If error, assume no subscription
+          zeroDepositMap.set(landlordId, false);
+        }
+      }
 
        // Add connection status if user is authenticated as a tenant
        if (userId && userRole === "tenant") {
@@ -179,27 +252,118 @@ export class PropertyController {
           });
                  });
 
-                 // Add connection status to each property
+                 // Add connection status, boost info, and zero deposit info to each property
          properties = properties.map(property => {
            const propertyObj = property.toObject();
            const propertyIdStr = property._id.toString();
            const connection = connectionMap.get(propertyIdStr);
+           const boostInfo = boostMap.get(propertyIdStr);
+           const landlordIdStr = property.landlordId?._id?.toString() || property.landlordId?.toString();
+           const hasZeroDepositSubscription = zeroDepositMap.get(landlordIdStr) || false;
            
            return {
              ...propertyObj,
              isConnected: !!connection,
-             connectionState: connection ? connection.status : "none"
+             connectionState: connection ? connection.status : "none",
+             // ✨ Premium boost info
+             isFeatured: boostInfo?.isFeatured || propertyObj.isFeatured || false,
+             boostInfo: boostInfo || null,
+             // ✨ Zero deposit info
+             zeroDepositAvailable: propertyObj.zeroDepositAvailable && hasZeroDepositSubscription,
+             zeroDepositSubscriptionActive: hasZeroDepositSubscription
            };
          });
       } else {
-        // For non-authenticated users or non-tenants, add false connection status
+        // For non-authenticated users or non-tenants, add false connection status, boost info, and zero deposit info
         properties = properties.map(property => {
           const propertyObj = property.toObject();
+          const propertyIdStr = property._id.toString();
+          const boostInfo = boostMap.get(propertyIdStr);
+          const landlordIdStr = property.landlordId?._id?.toString() || property.landlordId?.toString();
+          const hasZeroDepositSubscription = zeroDepositMap.get(landlordIdStr) || false;
+          
           return {
             ...propertyObj,
             isConnected: false,
-            connectionState: "none"
+            connectionState: "none",
+            // ✨ Premium boost info
+            isFeatured: boostInfo?.isFeatured || propertyObj.isFeatured || false,
+            boostInfo: boostInfo || null,
+            // ✨ Zero deposit info
+            zeroDepositAvailable: propertyObj.zeroDepositAvailable && hasZeroDepositSubscription,
+            zeroDepositSubscriptionActive: hasZeroDepositSubscription
           };
+        });
+      }
+      
+      // ✨ Rotate boosted properties by landlord to ensure fair distribution
+      // Separate boosted and non-boosted properties
+      const boostedProperties: any[] = [];
+      const nonBoostedProperties: any[] = [];
+      
+      properties.forEach(property => {
+        if (property.isFeatured) {
+          boostedProperties.push(property);
+        } else {
+          nonBoostedProperties.push(property);
+        }
+      });
+      
+      // Group boosted properties by landlord
+      const boostedByLandlord = new Map();
+      boostedProperties.forEach(property => {
+        const landlordId = property.landlordId?._id?.toString() || property.landlordId?.toString() || 'unknown';
+        if (!boostedByLandlord.has(landlordId)) {
+          boostedByLandlord.set(landlordId, []);
+        }
+        boostedByLandlord.get(landlordId).push(property);
+      });
+      
+      // Sort each landlord's boosted properties by creation date (newest first)
+      boostedByLandlord.forEach((props, landlordId) => {
+        props.sort((a: any, b: any) => {
+          const aDate = new Date(a.createdAt || 0).getTime();
+          const bDate = new Date(b.createdAt || 0).getTime();
+          return bDate - aDate;
+        });
+      });
+      
+      // Create rotation index based on page number and time (changes every hour)
+      // This ensures rotation changes over time and across pages
+      // Reuse the 'now' variable declared earlier in the function
+      const hourOfDay = now.getHours();
+      const rotationIndex = (Number(page) - 1 + hourOfDay) % Math.max(1, boostedByLandlord.size);
+      
+      // Convert map to array and rotate
+      const landlordGroups = Array.from(boostedByLandlord.entries());
+      if (landlordGroups.length > 0) {
+        // Rotate the array based on rotation index
+        const rotatedGroups = [
+          ...landlordGroups.slice(rotationIndex),
+          ...landlordGroups.slice(0, rotationIndex)
+        ];
+        
+        // Flatten rotated groups back into boosted properties array
+        const rotatedBoosted: any[] = [];
+        rotatedGroups.forEach(([landlordId, props]) => {
+          rotatedBoosted.push(...props);
+        });
+        
+        // Sort non-boosted properties by creation date (newest first)
+        nonBoostedProperties.sort((a, b) => {
+          const aDate = new Date(a.createdAt || 0).getTime();
+          const bDate = new Date(b.createdAt || 0).getTime();
+          return bDate - aDate;
+        });
+        
+        // Combine: rotated boosted properties first, then non-boosted
+        properties = [...rotatedBoosted, ...nonBoostedProperties];
+      } else {
+        // No boosted properties, just sort all by creation date
+        properties.sort((a, b) => {
+          const aDate = new Date(a.createdAt || 0).getTime();
+          const bDate = new Date(b.createdAt || 0).getTime();
+          return bDate - aDate;
         });
       }
 
@@ -432,14 +596,100 @@ export class PropertyController {
       const userId = (req as any).user?._id;
       const userRole = (req as any).user?.role;
 
+      // ✨ Get all published properties with active boosts
+      const now = new Date();
+      
+      // Get all active premium boosts
+      const activeBoosts = await RevenueSource.find({
+        sourceType: "premium_boost",
+        status: "collected"
+      }).populate("propertyId");
+      
+      // Get PaymentRequests to find boost duration
+      const propertyIds = activeBoosts
+        .map(b => b.propertyId?._id || b.propertyId)
+        .filter(Boolean);
+      
+      const boostPaymentRequests = await PaymentRequest.find({
+        requestType: "premium_boost",
+        propertyId: { $in: propertyIds },
+        status: { $in: ["approved", "processed"] }
+      });
+      
+      // Create a map of propertyId -> boost info
+      const boostMap = new Map();
+      const durationFromAmount = (amount: number): number => {
+        if (amount === 10) return 7;
+        if (amount === 15) return 30;
+        if (amount === 25) return 90;
+        return 30; // default
+      };
+      
+      const featuredPropertyIds: Types.ObjectId[] = [];
+      
+      for (const boost of activeBoosts) {
+        if (!boost.propertyId) continue;
+        const propId = boost.propertyId.toString();
+        
+        // Find duration from PaymentRequest
+        let duration = 30; // default
+        const paymentRequest = boostPaymentRequests.find(
+          pr => pr.propertyId?.toString() === propId
+        );
+        
+        if (paymentRequest?.notes) {
+          const durationMatch = paymentRequest.notes.match(/duration[:\s]+(\d+)/i);
+          if (durationMatch) {
+            duration = parseInt(durationMatch[1]);
+          }
+        }
+        
+        if (duration === 30 && boost.amount) {
+          duration = durationFromAmount(boost.amount);
+        }
+        
+        const boostStartDate = boost.createdAt || boost.updatedAt || now;
+        const boostExpiresAt = new Date(boostStartDate);
+        boostExpiresAt.setDate(boostExpiresAt.getDate() + duration);
+        
+        if (boostExpiresAt > now) {
+          const propertyId = boost.propertyId._id || boost.propertyId;
+          featuredPropertyIds.push(propertyId);
+          boostMap.set(propId, {
+            isFeatured: true,
+            boostExpiresAt: boostExpiresAt.toISOString(),
+            boostStartedAt: boostStartDate.toISOString(),
+            duration: duration
+          });
+        }
+      }
+      
+      // Get properties with active boosts (or fallback to isFeatured: true)
       let properties = await Property.find({ 
-        status: "published", 
-        isFeatured: true,
-        isVerified: true 
+        status: "published",
+        isVerified: true,
+        $or: [
+          { _id: { $in: featuredPropertyIds } },
+          { isFeatured: true }
+        ]
       })
-        .populate("landlordId", "firstName lastName")
+        .populate("landlordId", "firstName lastName email phone")
         .sort({ createdAt: -1 })
         .limit(Number(limit));
+      
+      // ✨ Fetch zero deposit protection subscription status for all landlords
+      const landlordIds = [...new Set(properties.map(p => p.landlordId?._id?.toString() || p.landlordId?.toString()).filter(Boolean))];
+      const zeroDepositMap = new Map();
+      
+      for (const landlordId of landlordIds) {
+        if (!landlordId) continue;
+        try {
+          const zeroDepositStatus = await landlordSubscriptionService.getZeroDepositProtectionStatus(landlordId);
+          zeroDepositMap.set(landlordId, zeroDepositStatus.isSubscribed);
+        } catch (error) {
+          zeroDepositMap.set(landlordId, false);
+        }
+      }
 
       // Add connection status if user is authenticated as a tenant
       if (userId && userRole === "tenant") {
@@ -447,10 +697,8 @@ export class PropertyController {
         const connections = await Connection.find({
           tenantId: userId,
           propertyId: { $in: propertyIds }
-          // Removed isActive: true filter to show ALL connections
         });
 
-        // Create a map for quick lookup
         const connectionMap = new Map();
         connections.forEach(conn => {
           connectionMap.set(conn.propertyId.toString(), {
@@ -463,27 +711,52 @@ export class PropertyController {
           });
         });
 
-                 // Add connection status to each property
-         properties = properties.map(property => {
-           const propertyObj = property.toObject();
-           const connection = connectionMap.get(property._id.toString());
-           return {
-             ...propertyObj,
-             isConnected: !!connection,
-             connectionState: connection ? connection.status : "none"
-           };
-         });
-      } else {
-        // For non-authenticated users or non-tenants, add false connection status
         properties = properties.map(property => {
           const propertyObj = property.toObject();
+          const propertyIdStr = property._id.toString();
+          const connection = connectionMap.get(propertyIdStr);
+          const boostInfo = boostMap.get(propertyIdStr);
+          const landlordIdStr = property.landlordId?._id?.toString() || property.landlordId?.toString();
+          const hasZeroDepositSubscription = zeroDepositMap.get(landlordIdStr) || false;
+          
+          return {
+            ...propertyObj,
+            isConnected: !!connection,
+            connectionState: connection ? connection.status : "none",
+            isFeatured: boostInfo?.isFeatured || propertyObj.isFeatured || false,
+            boostInfo: boostInfo || null,
+            zeroDepositAvailable: propertyObj.zeroDepositAvailable && hasZeroDepositSubscription,
+            zeroDepositSubscriptionActive: hasZeroDepositSubscription
+          };
+        });
+      } else {
+        properties = properties.map(property => {
+          const propertyObj = property.toObject();
+          const propertyIdStr = property._id.toString();
+          const boostInfo = boostMap.get(propertyIdStr);
+          const landlordIdStr = property.landlordId?._id?.toString() || property.landlordId?.toString();
+          const hasZeroDepositSubscription = zeroDepositMap.get(landlordIdStr) || false;
+          
           return {
             ...propertyObj,
             isConnected: false,
-            connectionState: "none"
+            connectionState: "none",
+            isFeatured: boostInfo?.isFeatured || propertyObj.isFeatured || false,
+            boostInfo: boostInfo || null,
+            zeroDepositAvailable: propertyObj.zeroDepositAvailable && hasZeroDepositSubscription,
+            zeroDepositSubscriptionActive: hasZeroDepositSubscription
           };
         });
       }
+      
+      // Sort by boost status (boosted first)
+      properties.sort((a, b) => {
+        const aBoosted = !!a.boostInfo;
+        const bBoosted = !!b.boostInfo;
+        if (aBoosted && !bBoosted) return -1;
+        if (!aBoosted && bBoosted) return 1;
+        return 0;
+      });
 
       res.status(200).json({ 
         success: true, 

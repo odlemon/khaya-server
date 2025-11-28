@@ -105,6 +105,18 @@ export class TenantSubscriptionController {
         status: "collected" // In-app payment is immediately collected
       });
 
+      // Add the subscription payment to escrow for accounting (100% to Khayalami)
+      const { escrowService } = await import("../services/EscrowService");
+      await escrowService.addToEscrow(payment, {
+        deductions: {
+          subscriptionFee: 0,
+          processingFee: 0,
+          insurancePremium: 0
+        },
+        revenueSourceIds: [revenueSource._id.toString()]
+      });
+      await escrowService.updateEscrowStatus(payment._id.toString(), "held");
+
       res.status(200).json({
         success: true,
         message: "Subscription activated successfully",
@@ -318,4 +330,6 @@ export class TenantSubscriptionController {
 }
 
 export const tenantSubscriptionController = new TenantSubscriptionController();
+
+
 

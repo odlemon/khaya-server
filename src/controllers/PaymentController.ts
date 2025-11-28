@@ -3,6 +3,7 @@ import { Request, Response, NextFunction } from "express";
 import { paymentService } from "../services/PaymentService";
 import { paymentRequestService } from "../services/PaymentRequestService";
 import { CommissionService } from "../services/CommissionService";
+import { transactionService } from "../services/TransactionService";
 import { Types } from "mongoose";
 
 const commissionService = new CommissionService();
@@ -251,6 +252,36 @@ export class PaymentController {
       res.json({
         success: true,
         data: transactions
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * Get landlord transactions plus summary/status data
+   */
+  async getLandlordTransactionsWithStatus(req: Request, res: Response, next: NextFunction) {
+    try {
+      const landlordId = (req as any).user?.id;
+      const limit = parseInt(req.query.limit as string) || 50;
+      const filters = {
+        landlordId,
+        status: req.query.status as string,
+        type: req.query.type as string,
+        startDate: req.query.startDate ? new Date(req.query.startDate as string) : undefined,
+        endDate: req.query.endDate ? new Date(req.query.endDate as string) : undefined
+      };
+
+      const transactions = await transactionService.getAllTransactions(filters);
+      const summary = await transactionService.getTransactionSummary(filters);
+
+      res.json({
+        success: true,
+        data: {
+          transactions: transactions.slice(0, limit),
+          summary
+        }
       });
     } catch (error) {
       next(error);

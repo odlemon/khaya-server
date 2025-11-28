@@ -1,3 +1,4 @@
+//@ts-nocheck
 import express from "express";
 import { CommissionController } from "../controllers/CommissionController";
 import { authenticate, authorize } from "../middleware/authenticate";

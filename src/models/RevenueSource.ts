@@ -3,7 +3,7 @@ import mongoose, { Document, Schema, Model } from "mongoose";
 
 export interface IRevenueSource extends Document {
   // Source identification
-  sourceType: "subscription" | "agreement_fee" | "processing_fee" | "premium_boost" | "insurance_commission" | "service_fee";
+  sourceType: "subscription" | "agreement_fee" | "processing_fee" | "premium_boost" | "insurance_commission" | "service_fee" | "zero_deposit_protection";
   
   // Financial details
   amount: number;
@@ -37,7 +37,7 @@ export interface IRevenueSource extends Document {
 const revenueSourceSchema = new Schema<IRevenueSource>({
   sourceType: {
     type: String,
-    enum: ["subscription", "agreement_fee", "processing_fee", "premium_boost", "insurance_commission", "service_fee"],
+    enum: ["subscription", "agreement_fee", "processing_fee", "premium_boost", "insurance_commission", "service_fee", "zero_deposit_protection"],
     required: true
   },
   
@@ -120,4 +120,5 @@ export const RevenueSource: Model<IRevenueSource> = mongoose.model<IRevenueSourc
   "RevenueSource",
   revenueSourceSchema
 );
+
 

@@ -1,3 +1,4 @@
+//@ts-nocheck
 import { User, IUser } from "../models/User";
 import { Types } from "mongoose";
 

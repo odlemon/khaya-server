@@ -12,6 +12,7 @@ export interface IProperty extends Document {
   address: {
     street: string;
     city: string;
+    area?: string; // Neighborhood/district/area name
     state?: string;
     postalCode?: string;
     country: string;
@@ -103,6 +104,7 @@ const propertySchema = new Schema<IProperty>(
     address: {
       street: { type: String, required: true },
       city: { type: String, required: true },
+      area: { type: String, required: false }, // Neighborhood/district/area name
       state: { type: String, required: false },
       postalCode: { type: String, required: false },
       country: { type: String, required: true, default: "South Africa" },
