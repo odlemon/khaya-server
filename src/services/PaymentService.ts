@@ -4,6 +4,12 @@ import { LandlordBalance } from "../models/LandlordBalance";
 import { Withdrawal } from "../models/Withdrawal";
 import { Rental } from "../models/Rental";
 import { CommissionService } from "./CommissionService";
+import { escrowService } from "./EscrowService";
+import { paymentCalculationService } from "./PaymentCalculationService";
+import { revenueSourceService } from "./RevenueSourceService";
+import { emailNotificationService } from "./EmailNotificationService";
+import { User } from "../models/User";
+import { Property } from "../models/Property";
 
 class PaymentService {
   private commissionService = new CommissionService();
@@ -67,32 +73,119 @@ class PaymentService {
       verifiedAt: data.paymentMethod === "in_app" ? new Date() : undefined
     });
     
-    // Credit landlord if online payment
+    // Calculate deductions before adding to escrow
+    const deductions = await paymentCalculationService.calculateRentDeductions(
+      data.amount,
+      userId,
+      rental.landlordId.toString(),
+      rentalId
+    );
+
+    // Create revenue source records
+    const revenueSourceIds: string[] = [];
+    
+    if (deductions.subscriptionFee > 0) {
+      const subRev = await revenueSourceService.createRevenueSource({
+        sourceType: "subscription",
+        amount: deductions.subscriptionFee,
+        payerId: userId,
+        recipientId: "khayalami",
+        paymentId: newPayment._id.toString(),
+        rentalId,
+        description: `Monthly subscription fee`
+      });
+      revenueSourceIds.push(subRev._id.toString());
+    }
+
+    if (deductions.processingFee > 0) {
+      const procRev = await revenueSourceService.createRevenueSource({
+        sourceType: "processing_fee",
+        amount: deductions.processingFee,
+        payerId: userId,
+        recipientId: "khayalami",
+        paymentId: newPayment._id.toString(),
+        rentalId,
+        description: `Processing fee (${(deductions.breakdown.processingFeeRate * 100).toFixed(1)}%)`
+      });
+      revenueSourceIds.push(procRev._id.toString());
+    }
+
+    if (deductions.insurancePremium > 0) {
+      const insRev = await revenueSourceService.createRevenueSource({
+        sourceType: "insurance_commission",
+        amount: deductions.insurancePremium,
+        payerId: userId,
+        recipientId: "khayalami",
+        paymentId: newPayment._id.toString(),
+        rentalId,
+        description: `Insurance premium commission`
+      });
+      revenueSourceIds.push(insRev._id.toString());
+    }
+
+    // Add payment to escrow with deductions
     if (data.paymentMethod === "in_app") {
-      await this.creditLandlordBalance(newPayment);
-      // Record commission for online payment (immediate collection)
-      await this.commissionService.recordOnlineCommission(
-        rentalId,
-        rental.landlordId.toString(),
-        rental.tenantId.toString(),
-        newPayment._id.toString(),
-        data.amount
-      );
+      // Online payment - add to escrow with "held" status (auto-verified)
+      await escrowService.addToEscrow(newPayment, {
+        deductions: {
+          subscriptionFee: deductions.subscriptionFee,
+          processingFee: deductions.processingFee,
+          insurancePremium: deductions.insurancePremium
+        },
+        revenueSourceIds
+      });
+      await escrowService.updateEscrowStatus(newPayment._id.toString(), "held");
     } else {
-      // Add to pending balance for cash
-      await this.addToPendingBalance(newPayment);
-      // Record commission for cash payment (debt tracking)
-      await this.commissionService.recordCashCommission(
-        rentalId,
-        rental.landlordId.toString(),
-        rental.tenantId.toString(),
-        newPayment._id.toString(),
-        data.amount
-      );
+      // Cash payment - add to escrow with "pending" status (needs verification)
+      await escrowService.addToEscrow(newPayment, {
+        deductions: {
+          subscriptionFee: deductions.subscriptionFee,
+          processingFee: deductions.processingFee,
+          insurancePremium: deductions.insurancePremium
+        },
+        revenueSourceIds
+      });
+      // Keep as "pending" until landlord verifies
     }
     
     // Update rental stats
     await this.updateRentalPaymentStats(rentalId);
+    
+    // Send email notifications
+    try {
+      const tenant = await User.findById(userId);
+      const landlord = await User.findById(rental.landlordId);
+      const property = await Property.findById(rental.propertyId);
+      
+      if (tenant && data.paymentMethod === "in_app") {
+        await emailNotificationService.sendPaymentConfirmed({
+          tenantEmail: tenant.email,
+          tenantName: `${tenant.firstName} ${tenant.lastName}`,
+          amount: data.amount,
+          deductions: {
+            subscriptionFee: deductions.subscriptionFee,
+            processingFee: deductions.processingFee,
+            insurancePremium: deductions.insurancePremium,
+            totalDeductions: deductions.khayalamiTotal
+          },
+          escrowStatus: "held"
+        });
+      }
+      
+      if (landlord && property) {
+        await emailNotificationService.sendRentDepositedEscrow({
+          landlordEmail: landlord.email,
+          landlordName: `${landlord.firstName} ${landlord.lastName}`,
+          tenantName: tenant ? `${tenant.firstName} ${tenant.lastName}` : "Tenant",
+          amount: data.amount,
+          netRentAmount: deductions.netRentAmount,
+          propertyTitle: property.title || property.address
+        });
+      }
+    } catch (emailError) {
+      console.error("Error sending email notifications:", emailError);
+      // Don't fail payment creation if email fails
+    }
     
     console.log(`💰 New payment created: ${newPayment._id} - ${data.amount} via ${data.paymentMethod}`);
     
@@ -148,37 +241,87 @@ class PaymentService {
     payment.utilityReceipts = data.utilityReceipts || [];
     payment.notes = data.notes;
     
+    // Calculate deductions
+    const deductions = await paymentCalculationService.calculateRentDeductions(
+      data.amount,
+      userId,
+      payment.landlordId.toString(),
+      payment.rentalId.toString()
+    );
+
+    // Create revenue source records
+    const revenueSourceIds: string[] = [];
+    
+    if (deductions.subscriptionFee > 0) {
+      const subRev = await revenueSourceService.createRevenueSource({
+        sourceType: "subscription",
+        amount: deductions.subscriptionFee,
+        payerId: userId,
+        recipientId: "khayalami",
+        paymentId: payment._id.toString(),
+        rentalId: payment.rentalId.toString(),
+        description: `Monthly subscription fee`
+      });
+      revenueSourceIds.push(subRev._id.toString());
+    }
+
+    if (deductions.processingFee > 0) {
+      const procRev = await revenueSourceService.createRevenueSource({
+        sourceType: "processing_fee",
+        amount: deductions.processingFee,
+        payerId: userId,
+        recipientId: "khayalami",
+        paymentId: payment._id.toString(),
+        rentalId: payment.rentalId.toString(),
+        description: `Processing fee (${(deductions.breakdown.processingFeeRate * 100).toFixed(1)}%)`
+      });
+      revenueSourceIds.push(procRev._id.toString());
+    }
+
+    if (deductions.insurancePremium > 0) {
+      const insRev = await revenueSourceService.createRevenueSource({
+        sourceType: "insurance_commission",
+        amount: deductions.insurancePremium,
+        payerId: userId,
+        recipientId: "khayalami",
+        paymentId: payment._id.toString(),
+        rentalId: payment.rentalId.toString(),
+        description: `Insurance premium commission`
+      });
+      revenueSourceIds.push(insRev._id.toString());
+    }
+
     if (data.paymentMethod === "in_app") {
       // In-app payment (gateway will be integrated later)
       payment.status = "verified"; // Auto-verified for in-app
       payment.verifiedAt = new Date();
       payment.gatewayResponse = data.gatewayResponse;
       
-      // Immediately credit landlord for in-app payments
-      await this.creditLandlordBalance(payment);
-      // Record commission for online payment (immediate collection)
-      await this.commissionService.recordOnlineCommission(
-        payment.rentalId.toString(),
-        payment.landlordId.toString(),
-        payment.tenantId.toString(),
-        payment._id.toString(),
-        data.amount
-      );
+      // Add to escrow with "held" status (auto-verified)
+      await escrowService.addToEscrow(payment, {
+        deductions: {
+          subscriptionFee: deductions.subscriptionFee,
+          processingFee: deductions.processingFee,
+          insurancePremium: deductions.insurancePremium
+        },
+        revenueSourceIds
+      });
+      await escrowService.updateEscrowStatus(payment._id.toString(), "held");
     } else {
       // Cash payment - receipt optional, needs verification
       payment.status = "paid";
       payment.proofOfPayment = data.proofOfPayment; // Optional
       
-      // Add to pending balance (not available until verified)
-      await this.addToPendingBalance(payment);
-      // Record commission for cash payment (debt tracking)
-      await this.commissionService.recordCashCommission(
-        payment.rentalId.toString(),
-        payment.landlordId.toString(),
-        payment.tenantId.toString(),
-        payment._id.toString(),
-        data.amount
-      );
+      // Add to escrow with "pending" status (needs verification)
+      await escrowService.addToEscrow(payment, {
+        deductions: {
+          subscriptionFee: deductions.subscriptionFee,
+          processingFee: deductions.processingFee,
+          insurancePremium: deductions.insurancePremium
+        },
+        revenueSourceIds
+      });
+      // Keep as "pending" until landlord verifies
     }
     
     await payment.save();
@@ -224,22 +367,18 @@ class PaymentService {
     
     await payment.save();
     
-    // Move from pending to available balance
-    await this.movePendingToAvailable(payment);
-    
-    // Collect any debt when landlord receives online payment
-    // This handles the case where landlord gets online payment and we collect their cash payment debts
-    const landlordBalance = await this.getLandlordBalance(landlordId);
-    if (landlordBalance.availableBalance > 0) {
-      await this.commissionService.collectDebt(
-        landlordId,
+    // Update escrow status from "pending" to "held" (ready for distribution)
+    // Only if payment has rentalId (rent payments, not subscriptions/boosts)
+    if (payment.rentalId) {
+      await escrowService.updateEscrowStatus(
         paymentId,
-        landlordBalance.availableBalance
+        "held",
+        landlordId
       );
+      
+      // Update rental stats
+      await this.updateRentalPaymentStats(payment.rentalId.toString());
     }
-    
-    // Update rental stats
-    await this.updateRentalPaymentStats(payment.rentalId.toString());
     
     console.log(`✅ Payment verified by landlord: ${paymentId}`);
     

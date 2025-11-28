@@ -3,7 +3,6 @@ import { Request, Response, NextFunction } from "express";
 import { Connection, IConnection } from "../models/Connection";
 import { User } from "../models/User";
 import { Property } from "../models/Property";
-import { DocumentVerificationService } from "../services/DocumentVerificationService";
 import { Types } from "mongoose";
 import { chatService } from "../services/ChatService";
 
@@ -23,16 +22,6 @@ export class ConnectionController {
         return res.status(403).json({
           success: false,
           message: "Only tenants can send connection requests"
-        });
-      }
-
-      // Check if tenant is document verified
-      const isDocumentVerified = await DocumentVerificationService.isUserDocumentVerified(userId);
-      if (!isDocumentVerified) {
-        return res.status(403).json({
-          success: false,
-          message: "You must complete document verification before sending connection requests. Please upload and verify your documents first.",
-          requiresDocumentVerification: true
         });
       }
 

@@ -69,14 +69,14 @@ export async function authenticateOptional(req: AuthRequest, res: Response, next
 export function authorize(roles: string[] | string) {
   return (req: AuthRequest, res: Response, next: NextFunction) => {
     if (!req.user) {
-      return res.status(401).json({ message: "Unauthorized" });
+      return res.status(401).json({ success: false, message: "Unauthorized" });
     }
 
     const userRole = req.user.role;
     const allowedRoles = typeof roles === "string" ? [roles] : roles;
 
     if (!allowedRoles.includes(userRole)) {
-      return res.status(403).json({ message: "Forbidden: insufficient permissions" });
+      return res.status(403).json({ success: false, message: "Forbidden: insufficient permissions" });
     }
 
     next();

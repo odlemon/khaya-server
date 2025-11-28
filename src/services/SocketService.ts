@@ -1,3 +1,4 @@
+//@ts-nocheck
 import { Server as SocketIOServer, Socket } from "socket.io"
 import jwt from "jsonwebtoken"
 import { User } from "../models/User"

@@ -115,7 +115,7 @@ export class AppDocumentVerificationController {
   async uploadTenantDocument(req: Request, res: Response, next: NextFunction) {
     try {
       const userId = (req as any).user._id;
-      const { documentType, urls, documentSubType } = req.body;
+      const { documentType, urls, documentSubType, selfieUrl } = req.body;
 
       if (!documentType || !urls || !Array.isArray(urls) || urls.length === 0) {
         return res.status(400).json({
@@ -138,7 +138,8 @@ export class AppDocumentVerificationController {
         userId,
         documentType,
         urls,
-        documentSubType
+        documentSubType,
+        selfieUrl // Pass selfieUrl to service
       });
 
       if (result.success) {
@@ -169,7 +170,7 @@ export class AppDocumentVerificationController {
   async uploadLandlordDocument(req: Request, res: Response, next: NextFunction) {
     try {
       const userId = (req as any).user._id;
-      const { documentType, urls, documentSubType } = req.body;
+      const { documentType, urls, documentSubType, selfieUrl } = req.body;
 
       if (!documentType || !urls || !Array.isArray(urls) || urls.length === 0) {
         return res.status(400).json({
@@ -192,7 +193,8 @@ export class AppDocumentVerificationController {
         userId,
         documentType,
         urls,
-        documentSubType
+        documentSubType,
+        selfieUrl // Pass selfieUrl to service
       });
 
       if (result.success) {

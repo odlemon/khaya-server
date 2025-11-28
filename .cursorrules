@@ -1,0 +1,7 @@
+# Cursor Rules
+
+## Code Modification Guidelines
+
+- When modifying code, modify file by file. Avoid making changes across multiple files simultaneously unless absolutely necessary.
+- Avoid creating duplicates of code. Always reuse existing code, functions, or utilities when possible instead of duplicating functionality.
+

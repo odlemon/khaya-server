@@ -12,6 +12,7 @@ export interface IProperty extends Document {
   address: {
     street: string;
     city: string;
+    area?: string; // Neighborhood/district/area name
     state?: string;
     postalCode?: string;
     country: string;
@@ -53,6 +54,8 @@ export interface IProperty extends Document {
   internetAvailable: boolean;
   parkingAvailable: boolean;
   parkingSpaces: number;
+  parkingAllocation?: string; // e.g., "2 parking bays: B-05-01, B-05-02"
+  accessCode?: string; // e.g., "Building code: 1234#"
   
   // Landlord Settings
   khayalamiAgentAssistance: boolean;
@@ -101,6 +104,7 @@ const propertySchema = new Schema<IProperty>(
     address: {
       street: { type: String, required: true },
       city: { type: String, required: true },
+      area: { type: String, required: false }, // Neighborhood/district/area name
       state: { type: String, required: false },
       postalCode: { type: String, required: false },
       country: { type: String, required: true, default: "South Africa" },
@@ -146,6 +150,8 @@ const propertySchema = new Schema<IProperty>(
     internetAvailable: { type: Boolean, default: false },
     parkingAvailable: { type: Boolean, default: false },
     parkingSpaces: { type: Number, default: 0 },
+    parkingAllocation: { type: String },
+    accessCode: { type: String },
     
     // Landlord Settings
     khayalamiAgentAssistance: { type: Boolean, default: false },

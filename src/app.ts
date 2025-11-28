@@ -90,6 +90,13 @@ import emailVerificationRoutes from "./routes/emailVerificationRoutes"
 import twoFactorAuthRoutes from "./routes/twoFactorAuthRoutes"
 import documentVerificationRoutes from "./routes/documentVerificationRoutes"
 import appDocumentVerificationRoutes from "./routes/appDocumentVerificationRoutes"
+import escrowRoutes from "./routes/escrowRoutes"
+import distributionRoutes from "./routes/distributionRoutes"
+import paymentRequestRoutes from "./routes/paymentRequestRoutes"
+import landlordPreferencesRoutes from "./routes/landlordPreferencesRoutes"
+import landlordSubscriptionRoutes from "./routes/landlordSubscriptionRoutes"
+import transactionRoutes from "./routes/transactionRoutes"
+import tenantSubscriptionRoutes from "./routes/tenantSubscriptionRoutes"
 
 app.use("/api/users", userRoutes)
 app.use("/api/auth", authRoutes)
@@ -116,8 +123,15 @@ app.use("/api/email-verification", emailVerificationRoutes)
 app.use("/api/2fa", twoFactorAuthRoutes)
 app.use("/api/documents", documentVerificationRoutes)
 app.use("/api/verification", appDocumentVerificationRoutes)
+app.use("/api/escrow", escrowRoutes)
+app.use("/api/distribution", distributionRoutes)
+app.use("/api/payment-requests", paymentRequestRoutes)
+app.use("/api/landlord/preferences", landlordPreferencesRoutes)
+app.use("/api/landlord/subscription", landlordSubscriptionRoutes)
+app.use("/api/tenant/subscription", tenantSubscriptionRoutes)
 app.use("/api/admin/dashboard", adminDashboardRoutes)
 app.use("/api/admin/reports", adminReportRoutes)
+app.use("/api/transactions", transactionRoutes)
 app.use(errorMiddleware)
 
 // Initialize Socket.IO service

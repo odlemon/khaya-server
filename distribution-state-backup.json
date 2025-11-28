@@ -1,0 +1,376 @@
+{
+  "timestamp": "2025-11-24T14:05:17.447Z",
+  "escrowAccount": {
+    "_id": "6921574cd899a418008d5aba",
+    "totalHeld": 2280,
+    "totalDistributed": 0,
+    "totalLandlordPayouts": 0,
+    "totalKhayalamiPayouts": 0,
+    "totalTransactions": 7,
+    "pendingTransactions": 7,
+    "distributedTransactions": 0
+  },
+  "escrowTransactions": [
+    {
+      "_id": "6922d205c3bcaf28f5c47932",
+      "paymentId": "6922d204c3bcaf28f5c4792a",
+      "landlordId": "68fca0d8124aee2c52c89153",
+      "tenantId": "68fca19f124aee2c52c8916d",
+      "totalAmount": 30,
+      "landlordAmount": 22.41,
+      "khayalamiAmount": 7.59,
+      "status": "held",
+      "deductions": {
+        "subscriptionFee": 6.99,
+        "processingFee": 0.6,
+        "insurancePremium": 0,
+        "totalDeductions": 7.59
+      },
+      "landlordPayoutStatus": "pending",
+      "khayalamiPayoutStatus": "pending",
+      "createdAt": "2025-11-23T09:21:09.698Z"
+    },
+    {
+      "_id": "6922d14fb95fbe26e5b513b9",
+      "paymentId": "6922d14db95fbe26e5b513b1",
+      "landlordId": "68fca0d8124aee2c52c89153",
+      "tenantId": "68fca19f124aee2c52c8916d",
+      "totalAmount": 20,
+      "landlordAmount": 12.61,
+      "khayalamiAmount": 7.390000000000001,
+      "status": "held",
+      "deductions": {
+        "subscriptionFee": 6.99,
+        "processingFee": 0.4,
+        "insurancePremium": 0,
+        "totalDeductions": 7.390000000000001
+      },
+      "landlordPayoutStatus": "pending",
+      "khayalamiPayoutStatus": "pending",
+      "createdAt": "2025-11-23T09:18:07.248Z"
+    },
+    {
+      "_id": "69215e9365d628c1df3094e7",
+      "paymentId": "69215e9265d628c1df3094e1",
+      "landlordId": "68fca0d8124aee2c52c89153",
+      "tenantId": "68fca19f124aee2c52c8916d",
+      "totalAmount": 500,
+      "landlordAmount": 490,
+      "khayalamiAmount": 10,
+      "status": "held",
+      "deductions": {
+        "subscriptionFee": 0,
+        "processingFee": 10,
+        "insurancePremium": 0,
+        "totalDeductions": 10
+      },
+      "landlordPayoutStatus": "pending",
+      "khayalamiPayoutStatus": "pending",
+      "createdAt": "2025-11-22T06:56:19.733Z"
+    },
+    {
+      "_id": "69215753d899a418008d5adb",
+      "paymentId": "69215752d899a418008d5ad3",
+      "landlordId": "6899dd5f771b3614fdd8c394",
+      "tenantId": "68972f275cbafc4fcf52ea37",
+      "totalAmount": 600,
+      "landlordAmount": 583.01,
+      "khayalamiAmount": 16.990000000000002,
+      "status": "held",
+      "deductions": {
+        "subscriptionFee": 4.99,
+        "processingFee": 12,
+        "insurancePremium": 0,
+        "totalDeductions": 16.990000000000002
+      },
+      "landlordPayoutStatus": "pending",
+      "khayalamiPayoutStatus": "pending",
+      "createdAt": "2025-11-22T06:25:23.992Z"
+    },
+    {
+      "_id": "6921574bd899a418008d5ab7",
+      "paymentId": "6921574ad899a418008d5aab",
+      "landlordId": "6899dd5f771b3614fdd8c394",
+      "tenantId": "68972f275cbafc4fcf52ea37",
+      "totalAmount": 500,
+      "landlordAmount": 485.01,
+      "khayalamiAmount": 14.99,
+      "status": "held",
+      "deductions": {
+        "subscriptionFee": 4.99,
+        "processingFee": 10,
+        "insurancePremium": 0,
+        "totalDeductions": 14.99
+      },
+      "landlordPayoutStatus": "pending",
+      "khayalamiPayoutStatus": "pending",
+      "createdAt": "2025-11-22T06:25:15.732Z"
+    }
+  ],
+  "landlordBalances": [
+    {
+      "_id": "690335d78fe5e3cf23dd527b",
+      "landlordId": "690335878fe5e3cf23dd521c",
+      "availableBalance": 0,
+      "pendingBalance": 0,
+      "totalEarnings": 0,
+      "totalWithdrawn": 0,
+      "transactions": []
+    },
+    {
+      "_id": "6900ce8dd36430d612f80f2f",
+      "landlordId": "6900cdf5d36430d612f80eb1",
+      "availableBalance": 0,
+      "pendingBalance": 0,
+      "totalEarnings": 0,
+      "totalWithdrawn": 0,
+      "transactions": []
+    },
+    {
+      "_id": "68fca106124aee2c52c8916a",
+      "landlordId": "68fca0d8124aee2c52c89153",
+      "availableBalance": 200,
+      "pendingBalance": 0,
+      "totalEarnings": 200,
+      "totalWithdrawn": 0,
+      "transactions": [
+        {
+          "type": "credit",
+          "amount": 200,
+          "description": "Payment verified - rent (REC-1761389396494-152)",
+          "date": "2025-10-25T10:50:44.233Z"
+        }
+      ]
+    },
+    {
+      "_id": "68f4ce0c17266f4bc84089fb",
+      "landlordId": "68a81dfe039be06c6062ea2f",
+      "availableBalance": 205,
+      "pendingBalance": 66,
+      "totalEarnings": 205,
+      "totalWithdrawn": 0,
+      "transactions": [
+        {
+          "type": "credit",
+          "amount": 100,
+          "description": "Payment from tenant - rent (REC-1760881434783-119)",
+          "date": "2025-10-19T13:43:55.320Z"
+        },
+        {
+          "type": "credit",
+          "amount": 23,
+          "description": "Payment verified - rent (REC-1760881386010-173)",
+          "date": "2025-10-20T02:25:20.934Z"
+        },
+        {
+          "type": "credit",
+          "amount": 12,
+          "description": "Payment verified - rent (REC-1760873997086-265)",
+          "date": "2025-10-20T02:25:35.307Z"
+        },
+        {
+          "type": "credit",
+          "amount": 20,
+          "description": "Payment from tenant - rent (REC-1761311945430-264)",
+          "date": "2025-10-24T13:19:05.889Z"
+        },
+        {
+          "type": "credit",
+          "amount": 50,
+          "description": "Payment from tenant - rent (REC-1761312035099-865)",
+          "date": "2025-10-24T13:20:35.639Z"
+        }
+      ]
+    }
+  ],
+  "payouts": [],
+  "revenueSources": [
+    {
+      "_id": "6924638a342f6ed6b40f1870",
+      "sourceType": "agreement_fee",
+      "amount": 30,
+      "payerId": "68fca19f124aee2c52c8916d",
+      "recipientId": "khayalami",
+      "status": "collected",
+      "paymentId": "6924638a342f6ed6b40f186e",
+      "createdAt": "2025-11-24T13:54:18.810Z"
+    },
+    {
+      "_id": "692457e74a1e139d249cf139",
+      "sourceType": "agreement_fee",
+      "amount": 30,
+      "payerId": "68fca19f124aee2c52c8916d",
+      "recipientId": "khayalami",
+      "status": "collected",
+      "paymentId": "692457e74a1e139d249cf137",
+      "createdAt": "2025-11-24T13:04:39.813Z"
+    },
+    {
+      "_id": "6922d205c3bcaf28f5c4792f",
+      "sourceType": "processing_fee",
+      "amount": 0.6,
+      "payerId": "68fca19f124aee2c52c8916d",
+      "recipientId": "khayalami",
+      "status": "pending",
+      "paymentId": "6922d204c3bcaf28f5c4792a",
+      "createdAt": "2025-11-23T09:21:09.151Z"
+    },
+    {
+      "_id": "6922d204c3bcaf28f5c4792d",
+      "sourceType": "subscription",
+      "amount": 6.99,
+      "payerId": "68fca19f124aee2c52c8916d",
+      "recipientId": "khayalami",
+      "status": "pending",
+      "paymentId": "6922d204c3bcaf28f5c4792a",
+      "createdAt": "2025-11-23T09:21:08.881Z"
+    },
+    {
+      "_id": "6922d14eb95fbe26e5b513b6",
+      "sourceType": "processing_fee",
+      "amount": 0.4,
+      "payerId": "68fca19f124aee2c52c8916d",
+      "recipientId": "khayalami",
+      "status": "pending",
+      "paymentId": "6922d14db95fbe26e5b513b1",
+      "createdAt": "2025-11-23T09:18:06.631Z"
+    },
+    {
+      "_id": "6922d14eb95fbe26e5b513b4",
+      "sourceType": "subscription",
+      "amount": 6.99,
+      "payerId": "68fca19f124aee2c52c8916d",
+      "recipientId": "khayalami",
+      "status": "pending",
+      "paymentId": "6922d14db95fbe26e5b513b1",
+      "createdAt": "2025-11-23T09:18:06.287Z"
+    },
+    {
+      "_id": "6922c701b95fbe26e5b5132a",
+      "sourceType": "subscription",
+      "amount": 6.99,
+      "payerId": "68fca19f124aee2c52c8916d",
+      "recipientId": "khayalami",
+      "status": "collected",
+      "paymentId": "6922c701b95fbe26e5b51323",
+      "createdAt": "2025-11-23T08:34:09.823Z"
+    },
+    {
+      "_id": "6922c613894a2b879d69f466",
+      "sourceType": "subscription",
+      "amount": 5.99,
+      "payerId": "68fca19f124aee2c52c8916d",
+      "recipientId": "khayalami",
+      "status": "collected",
+      "paymentId": "6922c612894a2b879d69f454",
+      "createdAt": "2025-11-23T08:30:11.378Z"
+    },
+    {
+      "_id": "6922a628e1cf9ea3a6728358",
+      "sourceType": "subscription",
+      "amount": 15,
+      "payerId": "68fca0d8124aee2c52c89153",
+      "recipientId": "khayalami",
+      "status": "collected",
+      "paymentId": "6922a627e1cf9ea3a6728356",
+      "createdAt": "2025-11-23T06:14:00.132Z"
+    },
+    {
+      "_id": "69229802198d399d40be1ddb",
+      "sourceType": "premium_boost",
+      "amount": 15,
+      "payerId": "68fca0d8124aee2c52c89153",
+      "recipientId": "khayalami",
+      "status": "collected",
+      "paymentId": "69229801198d399d40be1dd9",
+      "createdAt": "2025-11-23T05:13:38.106Z"
+    },
+    {
+      "_id": "6921cc118809adbf0a38cb10",
+      "sourceType": "premium_boost",
+      "amount": 15,
+      "payerId": "68fca0d8124aee2c52c89153",
+      "recipientId": "khayalami",
+      "status": "pending",
+      "paymentId": "6921cc108809adbf0a38cb0e",
+      "createdAt": "2025-11-22T14:43:29.079Z"
+    },
+    {
+      "_id": "6921ca7b8809adbf0a38caef",
+      "sourceType": "subscription",
+      "amount": 10,
+      "payerId": "68fca0d8124aee2c52c89153",
+      "recipientId": "khayalami",
+      "status": "pending",
+      "paymentId": "6921ca7a8809adbf0a38caed",
+      "createdAt": "2025-11-22T14:36:43.229Z"
+    },
+    {
+      "_id": "6921bd6d1cb09cc05046a79d",
+      "sourceType": "subscription",
+      "amount": 15,
+      "payerId": "68fca0d8124aee2c52c89153",
+      "recipientId": "khayalami",
+      "status": "pending",
+      "paymentId": "6921bd6d1cb09cc05046a79b",
+      "createdAt": "2025-11-22T13:41:01.792Z"
+    },
+    {
+      "_id": "69215e9365d628c1df3094e4",
+      "sourceType": "processing_fee",
+      "amount": 10,
+      "payerId": "68fca19f124aee2c52c8916d",
+      "recipientId": "khayalami",
+      "status": "pending",
+      "paymentId": "69215e9265d628c1df3094e1",
+      "createdAt": "2025-11-22T06:56:19.194Z"
+    },
+    {
+      "_id": "69215753d899a418008d5ad8",
+      "sourceType": "processing_fee",
+      "amount": 12,
+      "payerId": "68972f275cbafc4fcf52ea37",
+      "recipientId": "khayalami",
+      "status": "pending",
+      "paymentId": "69215752d899a418008d5ad3",
+      "createdAt": "2025-11-22T06:25:23.393Z"
+    },
+    {
+      "_id": "69215753d899a418008d5ad6",
+      "sourceType": "subscription",
+      "amount": 4.99,
+      "payerId": "68972f275cbafc4fcf52ea37",
+      "recipientId": "khayalami",
+      "status": "pending",
+      "paymentId": "69215752d899a418008d5ad3",
+      "createdAt": "2025-11-22T06:25:23.097Z"
+    },
+    {
+      "_id": "6921574bd899a418008d5ab3",
+      "sourceType": "processing_fee",
+      "amount": 10,
+      "payerId": "68972f275cbafc4fcf52ea37",
+      "recipientId": "khayalami",
+      "status": "pending",
+      "paymentId": "6921574ad899a418008d5aab",
+      "createdAt": "2025-11-22T06:25:15.264Z"
+    },
+    {
+      "_id": "6921574bd899a418008d5ab0",
+      "sourceType": "subscription",
+      "amount": 4.99,
+      "payerId": "68972f275cbafc4fcf52ea37",
+      "recipientId": "khayalami",
+      "status": "pending",
+      "paymentId": "6921574ad899a418008d5aab",
+      "createdAt": "2025-11-22T06:25:15.025Z"
+    }
+  ],
+  "summary": {
+    "totalHeld": 1650,
+    "totalLandlordHeld": 1593.04,
+    "totalKhayalamiHeld": 56.96,
+    "heldTransactionsCount": 5,
+    "totalTransactionsCount": 5
+  }
+}

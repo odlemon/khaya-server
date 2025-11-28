@@ -7,6 +7,7 @@ export interface DocumentUploadData {
   documentType: string;
   urls: string[];
   documentSubType?: string; // For ID document type
+  selfieUrl?: string; // For ID document verification - selfie to compare with ID
 }
 
 export interface DocumentVerificationData {
@@ -40,7 +41,8 @@ export class DocumentVerificationService {
             url: data.urls[0],
             type: data.documentSubType || "national_id",
             uploadedAt: now,
-            verified: false
+            verified: false,
+            ...(data.selfieUrl && { selfieUrl: data.selfieUrl }) // Include selfie if provided
           };
           break;
 

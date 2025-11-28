@@ -79,7 +79,7 @@ const expenseSchema = new Schema<IExpense>({
 
 const billSchema = new Schema<IBill>({
   matterId: { type: String, required: true, trim: true, index: true },
-  billNumber: { type: String, required: true, unique: true, trim: true },
+  billNumber: { type: String, required: true, unique: true, trim: true }, // unique: true creates index automatically
   title: { type: String, required: true, trim: true },
   description: { type: String, trim: true },
   
@@ -130,7 +130,7 @@ const billSchema = new Schema<IBill>({
 // Indexes for better performance
 billSchema.index({ matterId: 1, status: 1 });
 billSchema.index({ clientId: 1, status: 1 });
-billSchema.index({ billNumber: 1 });
+// billNumber already has unique: true, so no need for separate index
 billSchema.index({ billDate: -1 });
 billSchema.index({ dueDate: 1 });
 

@@ -1,6 +1,7 @@
 // @ts-nocheck
 import express from "express";
 import { propertyController } from "../controllers/PropertyController";
+import { premiumBoostController } from "../controllers/PremiumBoostController";
 import { authenticate } from "../middleware/authenticate";
 import { authorize } from "../middleware/authenticate";
 
@@ -29,5 +30,12 @@ router.patch("/:id/status", authenticate, (req, res, next) => propertyController
 
 // Image management routes
 router.patch("/:id/images", authenticate, (req, res, next) => propertyController.updatePropertyImages(req, res, next));
+
+// Boost routes (must come before /:id routes to avoid conflicts)
+router.get("/boosts/history", authenticate, (req, res, next) => propertyController.getAllBoostsHistory(req, res, next));
+router.post("/:propertyId/boost", authenticate, authorize(["landlord"]), (req, res, next) => premiumBoostController.purchaseBoost(req, res, next));
+router.post("/:propertyId/boost/request", authenticate, authorize(["landlord"]), (req, res, next) => premiumBoostController.createBoostPaymentRequest(req, res, next));
+router.get("/:propertyId/boosts", authenticate, authorize(["landlord"]), (req, res, next) => premiumBoostController.getPropertyBoosts(req, res, next));
+router.get("/:propertyId/boosts/history", authenticate, (req, res, next) => propertyController.getBoostHistory(req, res, next));
 
 export default router; 

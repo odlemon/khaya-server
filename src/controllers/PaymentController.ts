@@ -1,7 +1,9 @@
 // @ts-nocheck
 import { Request, Response, NextFunction } from "express";
 import { paymentService } from "../services/PaymentService";
+import { paymentRequestService } from "../services/PaymentRequestService";
 import { CommissionService } from "../services/CommissionService";
+import { transactionService } from "../services/TransactionService";
 import { Types } from "mongoose";
 
 const commissionService = new CommissionService();
@@ -30,19 +32,72 @@ export class PaymentController {
 
   /**
    * Create new payment (for multiple payments)
+   * Supports both online (in_app) and external payment methods
    */
   async createNewPayment(req: Request, res: Response, next: NextFunction) {
     try {
       const { rentalId } = req.params;
-      const userId = (req as any).user?.id;
+      const userId = (req as any).user?._id?.toString() || (req as any).user?._id || (req as any).user?.id || (req as any).user?.userId;
       const paymentData = req.body;
 
-      const payment = await paymentService.createNewPayment(rentalId, userId, paymentData);
+      // If payment method is external (not in_app), create payment request instead
+      if (paymentData.paymentMethod && paymentData.paymentMethod !== "in_app") {
+        // External payment - create payment request
+        if (!paymentData.proofOfPayment) {
+          return res.status(400).json({
+            success: false,
+            message: "Proof of payment is required for external payments"
+          });
+        }
+
+        const paymentRequest = await paymentRequestService.createPaymentRequest({
+          tenantId: userId,
+          rentalId: rentalId,
+          amount: paymentData.amount,
+          proofOfPayment: paymentData.proofOfPayment,
+          paymentMethod: paymentData.paymentMethod,
+          notes: paymentData.notes,
+          requestType: "rent"
+        });
+
+        return res.json({
+          success: true,
+          message: "Payment request submitted successfully. Waiting for admin approval.",
+          data: {
+            paymentRequest
+          }
+        });
+      }
+
+      // Online payment (in_app) - process immediately
+      if (!paymentData.gatewayResponse) {
+        return res.status(400).json({
+          success: false,
+          message: "Gateway response is required for online payments"
+        });
+      }
+
+      const payment = await paymentService.createNewPayment(rentalId, userId, {
+        ...paymentData,
+        paymentMethod: "in_app"
+      });
+
+      // Fetch escrow transaction
+      const { EscrowTransaction } = await import("../models/Escrow");
+      const escrowTransaction = await EscrowTransaction.findOne({ paymentId: payment._id });
+
+      // Fetch revenue sources
+      const { RevenueSource } = await import("../models/RevenueSource");
+      const revenueSources = await RevenueSource.find({ paymentId: payment._id });
 
       res.json({
         success: true,
-        message: "Payment created successfully",
-        data: payment
+        message: "Payment processed successfully and added to escrow",
+        data: {
+          payment,
+          escrowTransaction,
+          revenueSources
+        }
       });
     } catch (error) {
       next(error);
@@ -197,6 +252,36 @@ export class PaymentController {
       res.json({
         success: true,
         data: transactions
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * Get landlord transactions plus summary/status data
+   */
+  async getLandlordTransactionsWithStatus(req: Request, res: Response, next: NextFunction) {
+    try {
+      const landlordId = (req as any).user?.id;
+      const limit = parseInt(req.query.limit as string) || 50;
+      const filters = {
+        landlordId,
+        status: req.query.status as string,
+        type: req.query.type as string,
+        startDate: req.query.startDate ? new Date(req.query.startDate as string) : undefined,
+        endDate: req.query.endDate ? new Date(req.query.endDate as string) : undefined
+      };
+
+      const transactions = await transactionService.getAllTransactions(filters);
+      const summary = await transactionService.getTransactionSummary(filters);
+
+      res.json({
+        success: true,
+        data: {
+          transactions: transactions.slice(0, limit),
+          summary
+        }
       });
     } catch (error) {
       next(error);

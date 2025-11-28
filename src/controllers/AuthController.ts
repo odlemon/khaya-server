@@ -149,6 +149,10 @@ export class AuthController {
             user.firstName
           );
           
+          // Get document verification status
+          const documentVerificationStatus = user.documentVerification?.status || "unverified";
+          const isDocumentVerified = documentVerificationStatus === "verified";
+
           return res.status(200).json({
             success: true,
             message: "2FA verification required. Check your email for the verification PIN.",
@@ -158,7 +162,9 @@ export class AuthController {
               email: user.email,
               firstName: user.firstName,
               lastName: user.lastName,
-              role: user.role
+              role: user.role,
+              isDocumentVerified: isDocumentVerified,
+              documentVerificationStatus: documentVerificationStatus
             }
           });
         } catch (emailError) {
@@ -178,6 +184,10 @@ export class AuthController {
         lastName: user.lastName,
       }, JWT_SECRET, { expiresIn: "7d" });
 
+      // Get document verification status
+      const documentVerificationStatus = user.documentVerification?.status || "unverified";
+      const isDocumentVerified = documentVerificationStatus === "verified";
+
       return res.status(200).json({
         success: true,
         message: "Logged in successfully",
@@ -190,6 +200,8 @@ export class AuthController {
           role: user.role,
           phone: user.phone,
           isVerified: user.isVerified,
+          isDocumentVerified: isDocumentVerified,
+          documentVerificationStatus: documentVerificationStatus, // "unverified" | "pending" | "verified" | "rejected"
           requiresOnboarding: !user.isVerified, // If not verified, they need onboarding
         }
       });
@@ -239,6 +251,10 @@ export class AuthController {
           lastName: user.lastName,
         }, JWT_SECRET, { expiresIn: "7d" });
 
+        // Get document verification status
+        const documentVerificationStatus = user.documentVerification?.status || "unverified";
+        const isDocumentVerified = documentVerificationStatus === "verified";
+
         return res.status(200).json({
           success: true,
           message: "2FA verified successfully! Logged in.",
@@ -251,6 +267,8 @@ export class AuthController {
             role: user.role,
             phone: user.phone,
             isVerified: user.isVerified,
+            isDocumentVerified: isDocumentVerified,
+            documentVerificationStatus: documentVerificationStatus, // "unverified" | "pending" | "verified" | "rejected"
             twoFactorEnabled: user.twoFactorEnabled
           }
         });
@@ -274,6 +292,10 @@ export class AuthController {
         return res.status(404).json({ success: false, message: "User not found" });
       }
 
+      // Get document verification status
+      const documentVerificationStatus = user.documentVerification?.status || "unverified";
+      const isDocumentVerified = documentVerificationStatus === "verified";
+
       res.status(200).json({
         success: true,
         data: {
@@ -285,6 +307,8 @@ export class AuthController {
           phone: user.phone,
           isVerified: user.isVerified,
           isActive: user.isActive,
+          isDocumentVerified: isDocumentVerified,
+          documentVerificationStatus: documentVerificationStatus, // "unverified" | "pending" | "verified" | "rejected"
           requiresOnboarding: !user.isVerified, // If not verified, they need onboarding
           profile: user.profile,
           preferences: user.preferences,

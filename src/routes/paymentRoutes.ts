@@ -68,6 +68,12 @@ router.get("/transactions",
   (req, res, next) => paymentController.getTransactionHistory(req, res, next)
 );
 
+// Landlord: Get transactions + status summary
+router.get("/transactions/status",
+  authorize(["landlord"]),
+  (req, res, next) => paymentController.getLandlordTransactionsWithStatus(req, res, next)
+);
+
 // Admin: Get all payments in the system
 router.get("/admin/all", 
   authorize(["admin"]),

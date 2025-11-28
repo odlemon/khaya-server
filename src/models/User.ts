@@ -18,6 +18,7 @@ export interface IUser extends Document {
       // Common documents
       idDocument?: {
         url: string;
+        selfieUrl?: string; // Selfie image to compare with ID photo
         type: "passport" | "national_id" | "drivers_license";
         uploadedAt: Date;
         verified: boolean;
@@ -69,7 +70,17 @@ export interface IUser extends Document {
     dateOfBirth?: Date;
     idNumber?: string;
     idType?: "passport" | "national_id" | "drivers_license";
+    address?: {
+      street?: string;
+      city?: string;
+      state?: string;
+      postalCode?: string;
+      country?: string;
+    };
   };
+  // Landlord-specific fields
+  bankAccount?: string;
+  bankName?: string;
   preferences?: {
     theme?: string;
     language?: string;
@@ -123,6 +134,7 @@ const userSchema = new Schema<IUser>(
         // Common documents
         idDocument: {
           url: { type: String },
+          selfieUrl: { type: String }, // Selfie image to compare with ID photo
           type: { type: String, enum: ["passport", "national_id", "drivers_license"] },
           uploadedAt: { type: Date },
           verified: { type: Boolean, default: false }
@@ -173,8 +185,17 @@ const userSchema = new Schema<IUser>(
       location: { type: String },
       dateOfBirth: { type: Date },
       idNumber: { type: String },
-      idType: { type: String, enum: ["passport", "national_id", "drivers_license"] }
+      idType: { type: String, enum: ["passport", "national_id", "drivers_license"] },
+      address: {
+        street: { type: String },
+        city: { type: String },
+        state: { type: String },
+        postalCode: { type: String },
+        country: { type: String }
+      }
     },
+    bankAccount: { type: String },
+    bankName: { type: String },
     preferences: {
       type: Schema.Types.Mixed,
       default: {
