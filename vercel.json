@@ -5,15 +5,5 @@
   ],
   "routes": [
     { "src": "/(.*)", "dest": "src/app.ts" }
-  ],
-  "crons": [
-    {
-      "path": "/api/cron/rental-reminders",
-      "schedule": "* * * * *"
-    },
-    {
-      "path": "/api/cron/distribution",
-      "schedule": "0 0 * * *"
-    }
   ]
 } 
