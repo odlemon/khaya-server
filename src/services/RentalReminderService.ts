@@ -25,22 +25,25 @@ export class RentalReminderService {
       logger.info(`🔄 Test Mode: ${TEST_MODE ? 'ENABLED (7 days = 4 minutes)' : 'DISABLED (normal days)'}`);
       logger.info("🔄 Checking for upcoming rent payments that need reminders...");
 
-      const sevenDaysFromNow = TEST_MODE 
-        ? addDays(now, 7) // In test mode: 7 days = 4 minutes
+      // In test mode: look ahead 1 month (10 minutes) to catch all payments
+      // In production: look ahead 30 days to catch all payments
+      const searchWindow = TEST_MODE 
+        ? addMonths(now, 1) // Test mode: 1 month = 10 minutes
         : (() => {
             const date = new Date(now);
-            date.setDate(date.getDate() + 7);
+            date.setDate(date.getDate() + 30);
             return date;
           })();
 
-      logger.info(`🔄 Looking for payments due between: ${now.toISOString()} and ${sevenDaysFromNow.toISOString()}`);
+      logger.info(`🔄 Looking for payments due between: ${now.toISOString()} and ${searchWindow.toISOString()}`);
 
-      // Find all pending payments with due dates within next 7 days
+      // Find all pending payments with due dates within the search window
+      // We'll filter by reminder timing later
       const upcomingPayments = await Payment.find({
         status: "pending",
         dueDate: {
           $gte: now,
-          $lte: sevenDaysFromNow
+          $lte: searchWindow
         },
         paymentType: "rent"
       })
@@ -266,12 +269,16 @@ export class RentalReminderService {
     const types: Array<"7_days" | "3_days" | "1_day"> = [];
 
     if (TEST_MODE) {
-      // Test mode: allow some flexibility for timing
-      if (daysUntilDue >= 6 && daysUntilDue <= 7) {
+      // Test mode: 
+      // - 7-day reminder: payment due in ~4 minutes (7 days = 4 minutes)
+      // - 3-day reminder: payment due in ~1.7 minutes (3 days = 1.7 minutes)
+      // - 1-day reminder: payment due in ~0.57 minutes (1 day = 0.57 minutes)
+      // Allow some flexibility for timing (±0.5 minutes)
+      if (daysUntilDue >= 6 && daysUntilDue <= 8) {  // ~4 minutes before (7 days)
         types.push("7_days");
-      } else if (daysUntilDue >= 2 && daysUntilDue <= 3) {
+      } else if (daysUntilDue >= 1.5 && daysUntilDue <= 2.5) {  // ~1.7 minutes before (3 days)
         types.push("3_days");
-      } else if (daysUntilDue >= 0 && daysUntilDue <= 1) {
+      } else if (daysUntilDue >= 0 && daysUntilDue <= 1) {  // ~0.57 minutes before (1 day)
         types.push("1_day");
       }
     } else {
