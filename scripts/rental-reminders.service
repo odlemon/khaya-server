@@ -1,0 +1,16 @@
+[Unit]
+Description=Rental Reminders Cron Job (30s interval)
+After=network.target
+
+[Service]
+Type=simple
+User=YOUR_USERNAME
+WorkingDirectory=/home/YOUR_USERNAME/cron-jobs
+ExecStart=/home/YOUR_USERNAME/cron-jobs/cron-rental-reminders-test.sh
+Restart=always
+RestartSec=10
+StandardOutput=append:/home/YOUR_USERNAME/rental-reminders-service.log
+StandardError=append:/home/YOUR_USERNAME/rental-reminders-service-error.log
+
+[Install]
+WantedBy=multi-user.target
