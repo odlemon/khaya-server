@@ -22,20 +22,37 @@ const router = express.Router();
  * GET /api/cron/rental-reminders
  */
 router.get("/rental-reminders", async (req, res) => {
+  const timestamp = new Date().toISOString();
+  const clientIp = req.ip || req.connection.remoteAddress || 'unknown';
+  
   try {
-    logger.info("🔄 Cron job triggered: Rental Reminders");
+    logger.info("========================================");
+    logger.info("🔄 CRON ENDPOINT HIT: Rental Reminders");
+    logger.info(`🔄 Timestamp: ${timestamp}`);
+    logger.info(`🔄 Client IP: ${clientIp}`);
+    logger.info(`🔄 User-Agent: ${req.get('user-agent') || 'unknown'}`);
+    logger.info("========================================");
+    
     await runRentalReminderJob();
+    
+    logger.info("✅ Rental reminder job completed successfully");
+    
     res.status(200).json({ 
       success: true, 
       message: "Rental reminder job completed",
-      timestamp: new Date().toISOString()
+      timestamp: timestamp
     });
   } catch (error: any) {
-    logger.error("❌ Cron job failed: Rental Reminders", error);
+    logger.error("========================================");
+    logger.error("❌ CRON JOB FAILED: Rental Reminders");
+    logger.error(`❌ Timestamp: ${timestamp}`);
+    logger.error(`❌ Error: ${error.message}`);
+    logger.error("========================================");
+    
     res.status(500).json({ 
       success: false, 
       error: error.message,
-      timestamp: new Date().toISOString()
+      timestamp: timestamp
     });
   }
 });
