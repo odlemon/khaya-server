@@ -644,6 +644,154 @@ export class EmailNotificationService {
       </html>
     `;
   }
+
+  /**
+   * Send rent payment reminder email to tenant
+   */
+  async sendRentReminder(data: {
+    tenantEmail: string;
+    tenantName: string;
+    propertyAddress: string;
+    rentAmount: number;
+    dueDate: Date;
+    daysUntilDue: number;
+    reminderType: "7_days" | "3_days" | "1_day";
+  }): Promise<void> {
+    const subject = this.getRentReminderSubject(data.daysUntilDue, data.reminderType);
+    const htmlContent = this.getRentReminderTemplate(data);
+
+    await zeptoClient.sendMail({
+      from: {
+        address: "noreply@lysp.io",
+        name: "Khayalami"
+      },
+      to: [{
+        email_address: {
+          address: data.tenantEmail,
+          name: data.tenantName
+        }
+      }],
+      subject,
+      htmlbody: htmlContent
+    });
+  }
+
+  /**
+   * Get rent reminder email subject based on days until due
+   */
+  private getRentReminderSubject(daysUntilDue: number, reminderType: "7_days" | "3_days" | "1_day"): string {
+    if (daysUntilDue === 1) {
+      return "⏰ Reminder: Rent Payment Due Tomorrow - Khayalami";
+    } else if (daysUntilDue === 3) {
+      return "⏰ Reminder: Rent Payment Due in 3 Days - Khayalami";
+    } else {
+      return "⏰ Reminder: Rent Payment Due in 7 Days - Khayalami";
+    }
+  }
+
+  /**
+   * Get rent reminder email template
+   */
+  private getRentReminderTemplate(data: {
+    tenantName: string;
+    propertyAddress: string;
+    rentAmount: number;
+    dueDate: Date;
+    daysUntilDue: number;
+    reminderType: "7_days" | "3_days" | "1_day";
+  }): string {
+    const dueDateFormatted = new Date(data.dueDate).toLocaleDateString("en-US", {
+      weekday: "long",
+      year: "numeric",
+      month: "long",
+      day: "numeric"
+    });
+
+    const urgencyColor = data.daysUntilDue === 1 ? "#dc3545" : data.daysUntilDue === 3 ? "#ffc107" : "#17a2b8";
+    const urgencyMessage = data.daysUntilDue === 1 
+      ? "⚠️ Payment is due TOMORROW!" 
+      : data.daysUntilDue === 3 
+      ? "⏰ Payment due in 3 days" 
+      : "📅 Payment due in 7 days";
+
+    return `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="UTF-8">
+        <style>
+          body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; margin: 0; padding: 0; }
+          .container { max-width: 600px; margin: 0 auto; background: #fff; }
+          .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; text-align: center; }
+          .content { padding: 30px; }
+          .alert-box { background: ${urgencyColor}15; border-left: 4px solid ${urgencyColor}; padding: 20px; margin: 20px 0; border-radius: 5px; }
+          .amount { font-size: 36px; font-weight: bold; color: #667eea; text-align: center; margin: 20px 0; }
+          .info-box { background: #f8f9fa; padding: 20px; border-radius: 5px; margin: 20px 0; }
+          .info-row { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #e9ecef; }
+          .info-row:last-child { border-bottom: none; }
+          .info-label { font-weight: 600; color: #666; }
+          .info-value { color: #333; }
+          .button { display: inline-block; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 15px 30px; text-decoration: none; border-radius: 5px; margin: 20px 0; text-align: center; }
+          .footer { text-align: center; padding: 20px; color: #666; font-size: 14px; background: #f8f9fa; }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="header">
+            <h1>⏰ Rent Payment Reminder</h1>
+          </div>
+          <div class="content">
+            <p>Hello <strong>${data.tenantName}</strong>,</p>
+            
+            <div class="alert-box">
+              <h2 style="margin-top: 0; color: ${urgencyColor};">${urgencyMessage}</h2>
+            </div>
+
+            <p>This is a friendly reminder that your rent payment is coming up soon.</p>
+
+            <div class="amount">K${data.rentAmount.toFixed(2)}</div>
+
+            <div class="info-box">
+              <h3 style="margin-top: 0;">Payment Details:</h3>
+              <div class="info-row">
+                <span class="info-label">Property:</span>
+                <span class="info-value">${data.propertyAddress}</span>
+              </div>
+              <div class="info-row">
+                <span class="info-label">Rent Amount:</span>
+                <span class="info-value"><strong>K${data.rentAmount.toFixed(2)}</strong></span>
+              </div>
+              <div class="info-row">
+                <span class="info-label">Due Date:</span>
+                <span class="info-value"><strong>${dueDateFormatted}</strong></span>
+              </div>
+              <div class="info-row">
+                <span class="info-label">Days Remaining:</span>
+                <span class="info-value"><strong>${data.daysUntilDue} day${data.daysUntilDue !== 1 ? 's' : ''}</strong></span>
+              </div>
+            </div>
+
+            <p style="text-align: center;">
+              <a href="https://khaya-portal.vercel.app/tenant/payments" class="button">Pay Rent Now</a>
+            </p>
+
+            <p>Please ensure your payment is submitted before the due date to avoid any late fees or issues.</p>
+            
+            <p>You can make your payment through the Khayalami app or upload proof of external payment.</p>
+
+            <p>If you have already made the payment, please ignore this reminder.</p>
+
+            <p>If you have any questions or concerns, please contact your landlord or our support team.</p>
+          </div>
+          <div class="footer">
+            <p>© 2025 Khayalami. All rights reserved.</p>
+            <p>This is an automated reminder. Please do not reply to this email.</p>
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+  }
 }
 
 export const emailNotificationService = new EmailNotificationService();

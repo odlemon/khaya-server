@@ -9,7 +9,7 @@ export class DocumentVerificationController {
   async uploadDocuments(req: Request, res: Response, next: NextFunction) {
     try {
       const userId = (req as any).user._id;
-      const { documentType, urls, documentSubType, selfieUrl } = req.body;
+      const { documentType, urls, documentSubType, selfieUrl, selfieWithIdUrl } = req.body;
 
       if (!documentType || !urls || !Array.isArray(urls) || urls.length === 0) {
         return res.status(400).json({
@@ -23,7 +23,8 @@ export class DocumentVerificationController {
         documentType,
         urls,
         documentSubType,
-        selfieUrl // Pass selfieUrl to service
+        selfieUrl, // Pass selfieUrl to service
+        selfieWithIdUrl // Pass selfieWithIdUrl to service
       });
 
       if (result.success) {

@@ -8,6 +8,7 @@ export interface DocumentUploadData {
   urls: string[];
   documentSubType?: string; // For ID document type
   selfieUrl?: string; // For ID document verification - selfie to compare with ID
+  selfieWithIdUrl?: string; // For ID document verification - selfie holding the ID
 }
 
 export interface DocumentVerificationData {
@@ -42,7 +43,8 @@ export class DocumentVerificationService {
             type: data.documentSubType || "national_id",
             uploadedAt: now,
             verified: false,
-            ...(data.selfieUrl && { selfieUrl: data.selfieUrl }) // Include selfie if provided
+            ...(data.selfieUrl && { selfieUrl: data.selfieUrl }), // Include selfie if provided
+            ...(data.selfieWithIdUrl && { selfieWithIdUrl: data.selfieWithIdUrl }) // Include selfie with ID if provided
           };
           break;
 
@@ -185,21 +187,36 @@ export class DocumentVerificationService {
       .populate("documentVerification.rejectedBy", "firstName lastName")
       .sort({ "documentVerification.verifiedAt": -1, "documentVerification.rejectedAt": -1, createdAt: -1 });
 
-      return users.map(user => ({
-        userId: user._id,
-        name: `${user.firstName} ${user.lastName}`,
-        email: user.email,
-        role: user.role,
-        status: user.documentVerification.status,
-        documents: user.documentVerification.documents,
-        adminFeedback: user.documentVerification.adminFeedback,
-        verifiedAt: user.documentVerification.verifiedAt,
-        verifiedBy: user.documentVerification.verifiedBy,
-        rejectedAt: user.documentVerification.rejectedAt,
-        rejectedBy: user.documentVerification.rejectedBy,
-        rejectionReason: user.documentVerification.rejectionReason,
-        submittedAt: user.createdAt
-      }));
+      return users.map(user => {
+        // Ensure ID document includes all fields including selfieUrl and selfieWithIdUrl
+        const documents = { ...user.documentVerification.documents };
+        if (documents.idDocument) {
+          documents.idDocument = {
+            url: documents.idDocument.url || null,
+            selfieUrl: documents.idDocument.selfieUrl || null,
+            selfieWithIdUrl: documents.idDocument.selfieWithIdUrl || null,
+            type: documents.idDocument.type || null,
+            uploadedAt: documents.idDocument.uploadedAt || null,
+            verified: documents.idDocument.verified || false
+          };
+        }
+
+        return {
+          userId: user._id,
+          name: `${user.firstName} ${user.lastName}`,
+          email: user.email,
+          role: user.role,
+          status: user.documentVerification.status,
+          documents: documents,
+          adminFeedback: user.documentVerification.adminFeedback,
+          verifiedAt: user.documentVerification.verifiedAt,
+          verifiedBy: user.documentVerification.verifiedBy,
+          rejectedAt: user.documentVerification.rejectedAt,
+          rejectedBy: user.documentVerification.rejectedBy,
+          rejectionReason: user.documentVerification.rejectionReason,
+          submittedAt: user.createdAt
+        };
+      });
     } catch (error) {
       console.error("❌ Error getting all verifications:", error);
       throw error;
@@ -271,14 +288,18 @@ export class DocumentVerificationService {
 
   /**
    * Get required documents for role
+   * Note: employmentLetter is optional for tenants
+   * Note: Landlords only need idDocument (property proof is now per-listing)
    */
   static getRequiredDocuments(role: string): string[] {
     const commonDocuments = ["idDocument"];
     
     if (role === "tenant") {
-      return [...commonDocuments, "payslips", "utilityBills", "bankStatements", "employmentLetter"];
+      // employmentLetter is optional, not required
+      return [...commonDocuments, "payslips", "utilityBills", "bankStatements"];
     } else if (role === "landlord") {
-      return [...commonDocuments, "propertyProof", "propertyDocuments"];
+      // Landlords only need ID document - property proof is uploaded per listing
+      return commonDocuments;
     }
     
     return commonDocuments;

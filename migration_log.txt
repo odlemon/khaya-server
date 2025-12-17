@@ -1,0 +1,6 @@
+[2025-12-10T09:02:26.981Z] 🚀 Starting migration script...
+[2025-12-10T09:02:29.458Z] ✅ Connected to MongoDB
+
+[2025-12-10T09:02:30.220Z] 📊 Found 0 chats without propertyId
+
+[2025-12-10T09:02:30.220Z] ✅ All chats already have propertyId!

@@ -41,5 +41,6 @@ router.get("/pending-requests", authorize(["tenant"]), chatController.getTenantP
 router.get("/admin/all-chats", authorize(["admin"]), chatController.getAllChats.bind(chatController));
 router.post("/admin/join/:chatId", authorize(["admin"]), chatController.adminJoinChat.bind(chatController));
 router.post("/admin/cleanup-duplicates", authorize(["admin"]), chatController.cleanupDuplicateParticipants.bind(chatController));
+router.post("/admin/link-to-property", authorize(["admin"]), chatController.linkChatToProperty.bind(chatController));
 
 export default router; 

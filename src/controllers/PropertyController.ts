@@ -253,26 +253,28 @@ export class PropertyController {
                  });
 
                  // Add connection status, boost info, and zero deposit info to each property
-         properties = properties.map(property => {
-           const propertyObj = property.toObject();
-           const propertyIdStr = property._id.toString();
-           const connection = connectionMap.get(propertyIdStr);
-           const boostInfo = boostMap.get(propertyIdStr);
-           const landlordIdStr = property.landlordId?._id?.toString() || property.landlordId?.toString();
-           const hasZeroDepositSubscription = zeroDepositMap.get(landlordIdStr) || false;
-           
-           return {
-             ...propertyObj,
-             isConnected: !!connection,
-             connectionState: connection ? connection.status : "none",
-             // ✨ Premium boost info
-             isFeatured: boostInfo?.isFeatured || propertyObj.isFeatured || false,
-             boostInfo: boostInfo || null,
-             // ✨ Zero deposit info
-             zeroDepositAvailable: propertyObj.zeroDepositAvailable && hasZeroDepositSubscription,
-             zeroDepositSubscriptionActive: hasZeroDepositSubscription
-           };
-         });
+        properties = properties.map(property => {
+          const propertyObj = property.toObject();
+          const propertyIdStr = property._id.toString();
+          const connection = connectionMap.get(propertyIdStr);
+          const boostInfo = boostMap.get(propertyIdStr);
+          const landlordIdStr = property.landlordId?._id?.toString() || property.landlordId?.toString();
+          const hasZeroDepositSubscription = zeroDepositMap.get(landlordIdStr) || false;
+          
+          return {
+            ...propertyObj,
+            isConnected: !!connection,
+            connectionState: connection ? connection.status : "none",
+            // ✨ Premium boost info
+            isFeatured: boostInfo?.isFeatured || propertyObj.isFeatured || false,
+            boostInfo: boostInfo || null,
+            // ✨ Zero deposit info
+            zeroDepositAvailable: propertyObj.zeroDepositAvailable && hasZeroDepositSubscription,
+            zeroDepositSubscriptionActive: hasZeroDepositSubscription,
+            // ✨ Explicit verification status for frontend/admin
+            verificationStatus: propertyObj.isVerified ? "verified" : "unverified"
+          };
+        });
       } else {
         // For non-authenticated users or non-tenants, add false connection status, boost info, and zero deposit info
         properties = properties.map(property => {
@@ -291,7 +293,9 @@ export class PropertyController {
             boostInfo: boostInfo || null,
             // ✨ Zero deposit info
             zeroDepositAvailable: propertyObj.zeroDepositAvailable && hasZeroDepositSubscription,
-            zeroDepositSubscriptionActive: hasZeroDepositSubscription
+            zeroDepositSubscriptionActive: hasZeroDepositSubscription,
+            // ✨ Explicit verification status for frontend/admin
+            verificationStatus: propertyObj.isVerified ? "verified" : "unverified"
           };
         });
       }
@@ -426,6 +430,12 @@ export class PropertyController {
          propertyData.isConnected = false;
          propertyData.connectionState = "none";
        }
+
+      // Add explicit verificationStatus for frontend/admin
+      propertyData = {
+        ...propertyData,
+        verificationStatus: propertyData.isVerified ? "verified" : "unverified"
+      };
 
       res.status(200).json({ success: true, data: propertyData });
     } catch (error: any) {
@@ -1153,6 +1163,48 @@ export class PropertyController {
             expired: expiredBoosts.length
           }
         }
+      });
+    } catch (error: any) {
+      next(error);
+    }
+  }
+
+  /**
+   * Admin: Verify a property listing
+   * POST /api/properties/admin/:id/verify
+   */
+  async verifyPropertyListing(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { id } = req.params;
+
+      if (!Types.ObjectId.isValid(id)) {
+        return res.status(400).json({ success: false, message: "Invalid property ID" });
+      }
+
+      const property = await Property.findById(id);
+      if (!property) {
+        return res.status(404).json({ success: false, message: "Property not found" });
+      }
+
+      // Check if property has proof documents uploaded
+      if (!property.propertyProofDocuments || property.propertyProofDocuments.length === 0) {
+        return res.status(400).json({
+          success: false,
+          message: "Cannot verify listing without propertyProofDocuments uploaded"
+        });
+      }
+
+      // Verify the property
+      property.isVerified = true;
+      await property.save();
+
+      const propertyData = property.toObject();
+      propertyData.verificationStatus = "verified";
+
+      return res.status(200).json({
+        success: true,
+        message: "Property listing verified successfully",
+        data: propertyData
       });
     } catch (error: any) {
       next(error);

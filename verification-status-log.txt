@@ -1,0 +1,40 @@
+✅ Connected to MongoDB
+
+════════════════════════════════════════════════════════════════════════════════
+🔍 VERIFYING DOCUMENT VERIFICATION STATUS
+════════════════════════════════════════════════════════════════════════════════
+⏰ Time: 16/12/2025, 16:04:49
+
+🔍 User ID: 6925b95302dfd334e855f29f
+
+📋 User Information:
+  User ID: 6925b95302dfd334e855f29f
+  Name: Farai Chimoto
+  Email: farainyariechimoto@gmail.com
+  Role: landlord
+  isVerified: true
+  isActive: true
+
+📄 Document Verification Status:
+  Status: unverified
+  Verified At: N/A
+  Rejected At: N/A
+  Admin Feedback: N/A
+  Rejection Reason: N/A
+
+📎 Documents:
+  ✅ ID Document: DELETED
+  ✅ Payslips: DELETED
+  ✅ Utility Bills: DELETED
+  ✅ Bank Statements: DELETED
+  ✅ Employment Letter: DELETED
+  ✅ Property Proof: DELETED
+  ✅ Property Documents: DELETED
+
+════════════════════════════════════════════════════════════════════════════════
+✅ SUCCESS: All documents have been deleted!
+✅ Document verification status is correctly set to "unverified"
+════════════════════════════════════════════════════════════════════════════════
+
+✅ Disconnected from MongoDB
+

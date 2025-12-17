@@ -7,6 +7,7 @@ import { ServiceBooking } from "../models/ServiceBooking";
 import { MaintenanceRequest } from "../models/MaintenanceRequest";
 import { Chat } from "../models/Chat";
 import { Property } from "../models/Property";
+import { rentalReminderService } from "./RentalReminderService";
 import { Types } from "mongoose";
 
 export class TenantDashboardService {
@@ -21,14 +22,16 @@ export class TenantDashboardService {
         serviceStats,
         maintenanceStats,
         chatStats,
-        profileCompletion
+        profileCompletion,
+        reminderInfo
       ] = await Promise.all([
         this.getCurrentRental(tenantId),
         this.getPaymentStats(tenantId),
         this.getServiceStats(tenantId),
         this.getMaintenanceStats(tenantId),
         this.getChatStats(tenantId),
-        this.getProfileCompletion(tenantId)
+        this.getProfileCompletion(tenantId),
+        this.getReminderInfo(tenantId)
       ]);
 
       return {
@@ -76,11 +79,44 @@ export class TenantDashboardService {
           completion: profileCompletion.percentage,
           isVerified: await this.isTenantVerified(tenantId),
           missing: profileCompletion.missing
-        }
+        },
+
+        // Rental reminders
+        reminders: reminderInfo
       };
     } catch (error) {
       console.error("Error getting tenant dashboard:", error);
       throw error;
+    }
+  }
+
+  /**
+   * Get reminder information for tenant
+   */
+  private async getReminderInfo(tenantId: string): Promise<any> {
+    try {
+      const upcomingPayments = await rentalReminderService.getUpcomingPaymentsForTenant(tenantId);
+      
+      const nextPayment = upcomingPayments.length > 0 ? upcomingPayments[0] : null;
+      
+      return {
+        upcomingPaymentsCount: upcomingPayments.length,
+        nextPaymentDue: nextPayment ? {
+          amount: nextPayment.amount,
+          dueDate: nextPayment.dueDate,
+          daysUntilDue: nextPayment.daysUntilDue,
+          property: nextPayment.property
+        } : null,
+        hasUpcomingReminders: upcomingPayments.length > 0
+      };
+    } catch (error) {
+      console.error("Error getting reminder info:", error);
+      // Return default values if reminder service fails
+      return {
+        upcomingPaymentsCount: 0,
+        nextPaymentDue: null,
+        hasUpcomingReminders: false
+      };
     }
   }
 

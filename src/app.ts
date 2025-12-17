@@ -97,6 +97,7 @@ import landlordPreferencesRoutes from "./routes/landlordPreferencesRoutes"
 import landlordSubscriptionRoutes from "./routes/landlordSubscriptionRoutes"
 import transactionRoutes from "./routes/transactionRoutes"
 import tenantSubscriptionRoutes from "./routes/tenantSubscriptionRoutes"
+import cronRoutes from "./routes/cronRoutes"
 
 app.use("/api/users", userRoutes)
 app.use("/api/auth", authRoutes)
@@ -132,6 +133,7 @@ app.use("/api/tenant/subscription", tenantSubscriptionRoutes)
 app.use("/api/admin/dashboard", adminDashboardRoutes)
 app.use("/api/admin/reports", adminReportRoutes)
 app.use("/api/transactions", transactionRoutes)
+app.use("/api/cron", cronRoutes)
 app.use(errorMiddleware)
 
 // Initialize Socket.IO service

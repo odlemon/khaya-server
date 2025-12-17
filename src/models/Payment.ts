@@ -5,6 +5,7 @@ export interface IPayment extends Document {
   rentalId?: mongoose.Types.ObjectId; // Optional - not needed for subscriptions/boosts
   agreementId?: mongoose.Types.ObjectId; // Optional - not needed for subscriptions/boosts
   propertyId?: mongoose.Types.ObjectId; // Optional - not needed for subscriptions
+  invoiceId?: mongoose.Types.ObjectId; // Link to invoice being paid (for rent payments)
   landlordId: mongoose.Types.ObjectId;
   tenantId: mongoose.Types.ObjectId;
   
