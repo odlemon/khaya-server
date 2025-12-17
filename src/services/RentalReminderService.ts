@@ -9,7 +9,7 @@ import { emailNotificationService } from "./EmailNotificationService";
 import { invoiceService } from "./InvoiceService";
 import { Types } from "mongoose";
 import { logger } from "../utils/logger";
-import { TEST_MODE, daysToMinutes, addDays } from "../config/testMode";
+import { TEST_MODE, daysToMinutes, addDays, addMonths } from "../config/testMode";
 
 export class RentalReminderService {
   /**
