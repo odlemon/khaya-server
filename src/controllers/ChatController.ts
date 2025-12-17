@@ -134,12 +134,16 @@ export class ChatController {
         await chatService.markMessagesAsRead(chatId, unreadMessageIds, userId);
       }
 
+      // Ensure property data is included in response
+      const chatObject = chat.toObject ? chat.toObject() : chat;
+      
       res.status(200).json({
         success: true,
         message: "Chat retrieved successfully",
         data: { 
           chat: {
-            ...chat.toObject?.() ?? chat,
+            ...chatObject,
+            propertyId: chatObject.propertyId || null, // Ensure propertyId is always included
             counterpart
           }, 
           messages: messagesWithFlags 
@@ -761,6 +765,32 @@ export class ChatController {
         success: true,
         message: "Duplicate participants cleaned up successfully",
         data: result
+      });
+    } catch (error: any) {
+      next(error);
+    }
+  }
+
+  /**
+   * Link a chat to a property (Admin only, for migrating old chats)
+   */
+  async linkChatToProperty(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { chatId, propertyId } = req.body;
+
+      if (!chatId || !propertyId) {
+        return res.status(400).json({
+          success: false,
+          message: "Chat ID and Property ID are required"
+        });
+      }
+
+      const chat = await chatService.linkChatToProperty(chatId, propertyId);
+
+      res.status(200).json({
+        success: true,
+        message: "Chat linked to property successfully",
+        data: chat
       });
     } catch (error: any) {
       next(error);

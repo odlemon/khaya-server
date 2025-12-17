@@ -72,7 +72,10 @@ export interface IProperty extends Document {
     floorPlan?: string; // Floor plan image
     virtualTour?: string; // 360° tour URL
   };
-  
+  // Per-listing property ownership proof documents
+  // e.g. ["https://.../ownership-deed.pdf"]
+  propertyProofDocuments?: string[] | null;
+ 
   // Status
   status: "draft" | "published" | "rented" | "inactive";
   isVerified: boolean;
@@ -167,6 +170,12 @@ const propertySchema = new Schema<IProperty>(
       gallery: [{ type: String }], // Additional images
       floorPlan: { type: String }, // Optional floor plan
       virtualTour: { type: String } // Optional virtual tour URL
+    },
+    // Per-listing property ownership proof documents
+    // Existing properties will have this as null until updated
+    propertyProofDocuments: {
+      type: [String],
+      default: null
     },
     
     // Status

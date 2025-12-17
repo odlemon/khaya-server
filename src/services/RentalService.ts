@@ -4,6 +4,7 @@ import { ConditionLog } from "../models/ConditionLog";
 import { Payment } from "../models/Payment";
 import { Agreement } from "../models/Agreement";
 import { Types } from "mongoose";
+import { TEST_MODE, addMonths } from "../config/testMode";
 
 export class RentalService {
   /**
@@ -47,23 +48,33 @@ export class RentalService {
     console.log(`🎉 Rental created for agreement: ${agreementId}`);
 
     // Create initial payment records
+    console.log(`📅 Creating payment schedule for rental: ${rental._id}`);
     await this.createPaymentSchedule(rental);
+    console.log(`✅ Payment schedule created for rental: ${rental._id}`);
 
     return rental;
   }
 
   /**
    * Create payment schedule for the rental period
+   * In test mode: 1 month = 10 minutes
    */
   async createPaymentSchedule(rental: IRental): Promise<void> {
     const startDate = new Date(rental.startDate);
     const endDate = new Date(rental.endDate);
     let currentDate = new Date(startDate);
 
+    console.log(`📊 Payment Schedule Creation Started:`);
+    console.log(`   - Rental ID: ${rental._id}`);
+    console.log(`   - Start Date: ${startDate.toISOString()}`);
+    console.log(`   - End Date: ${endDate.toISOString()}`);
+    console.log(`   - Monthly Rent: K${rental.monthlyRent}`);
+    console.log(`   - Test Mode: ${TEST_MODE ? 'ENABLED (1 month = 10 minutes)' : 'DISABLED (normal months)'}`);
+
     let paymentCount = 0;
 
     while (currentDate <= endDate) {
-      await Payment.create({
+      const payment = await Payment.create({
         rentalId: rental._id,
         agreementId: rental.agreementId,
         propertyId: rental.propertyId,
@@ -76,16 +87,30 @@ export class RentalService {
       });
 
       paymentCount++;
+      console.log(`   ✅ Payment ${paymentCount} created: ID=${payment._id}, Due=${currentDate.toISOString()}, Amount=K${rental.monthlyRent}`);
       
       // Move to next month
-      currentDate.setMonth(currentDate.getMonth() + 1);
+      if (TEST_MODE) {
+        // Test mode: 1 month = 10 minutes
+        const oldDate = new Date(currentDate);
+        currentDate = addMonths(currentDate, 1);
+        console.log(`   ⏭️  Next payment: ${oldDate.toISOString()} → ${currentDate.toISOString()} (10 minutes later in test mode)`);
+      } else {
+        // Production mode: actual months
+        const oldDate = new Date(currentDate);
+        currentDate.setMonth(currentDate.getMonth() + 1);
+        console.log(`   ⏭️  Next payment: ${oldDate.toISOString()} → ${currentDate.toISOString()} (1 month later)`);
+      }
     }
 
     // Update rental stats
     rental.stats.totalPaymentsDue = paymentCount;
     await rental.save();
 
-    console.log(`💰 Created ${paymentCount} payment records for rental: ${rental._id}`);
+    console.log(`💰 Payment Schedule Complete:`);
+    console.log(`   - Total Payments Created: ${paymentCount}`);
+    console.log(`   - Rental ID: ${rental._id}`);
+    console.log(`   - Test Mode: ${TEST_MODE ? 'ENABLED' : 'DISABLED'}`);
   }
 
   /**

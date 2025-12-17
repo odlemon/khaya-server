@@ -19,6 +19,7 @@ export interface IUser extends Document {
       idDocument?: {
         url: string;
         selfieUrl?: string; // Selfie image to compare with ID photo
+        selfieWithIdUrl?: string; // Selfie image holding the ID document
         type: "passport" | "national_id" | "drivers_license";
         uploadedAt: Date;
         verified: boolean;
@@ -135,6 +136,7 @@ const userSchema = new Schema<IUser>(
         idDocument: {
           url: { type: String },
           selfieUrl: { type: String }, // Selfie image to compare with ID photo
+          selfieWithIdUrl: { type: String }, // Selfie image holding the ID document
           type: { type: String, enum: ["passport", "national_id", "drivers_license"] },
           uploadedAt: { type: Date },
           verified: { type: Boolean, default: false }

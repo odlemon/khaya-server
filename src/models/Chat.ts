@@ -67,10 +67,14 @@ const chatSchema = new Schema<IChat>({
     ref: "User",
     required: true
   }],
+  // IMPORTANT: Each chat is tied to exactly ONE property
+  // One chat = One property (enforced at database level)
+  // If a landlord has multiple properties, they will have separate chats for each property
+  // NOTE: propertyId is optional to support legacy chats that were created before this requirement
   propertyId: {
     type: Schema.Types.ObjectId,
     ref: "Property",
-    required: true
+    required: false  // Made optional to support old chats without propertyId
   },
   lastMessage: {
     content: String,

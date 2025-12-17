@@ -45,16 +45,18 @@ export class AppDocumentVerificationController {
 
   /**
    * Get required documents for tenants
+   * Note: employmentLetter is optional
    */
   async getTenantRequiredDocuments(req: Request, res: Response, next: NextFunction) {
     try {
-      const requiredDocuments = ["idDocument", "payslips", "utilityBills", "bankStatements", "employmentLetter"];
+      const requiredDocuments = ["idDocument", "payslips", "utilityBills", "bankStatements"];
+      const optionalDocuments = ["employmentLetter"];
       const documentDescriptions = {
         idDocument: "Government-issued ID (Passport, National ID, or Driver's License)",
         payslips: "Recent payslips (last 3 months)",
         utilityBills: "Utility bills (electricity, water, internet) in your name",
         bankStatements: "Bank statements (last 3 months)",
-        employmentLetter: "Employment verification letter from your employer"
+        employmentLetter: "Employment verification letter from your employer (optional)"
       };
 
       res.status(200).json({
@@ -63,12 +65,15 @@ export class AppDocumentVerificationController {
         data: {
           role: "tenant",
           requiredDocuments,
+          optionalDocuments,
+          allDocuments: [...requiredDocuments, ...optionalDocuments], // For backward compatibility
           documentDescriptions,
           tips: [
             "Upload clear, readable images of your documents",
             "Ensure all text is visible and not cut off",
             "Documents should be recent (within 3 months for financial documents)",
-            "Make sure documents are in your name"
+            "Make sure documents are in your name",
+            "Employment letter is optional but recommended"
           ]
         }
       });
@@ -115,7 +120,7 @@ export class AppDocumentVerificationController {
   async uploadTenantDocument(req: Request, res: Response, next: NextFunction) {
     try {
       const userId = (req as any).user._id;
-      const { documentType, urls, documentSubType, selfieUrl } = req.body;
+      const { documentType, urls, documentSubType, selfieUrl, selfieWithIdUrl } = req.body;
 
       if (!documentType || !urls || !Array.isArray(urls) || urls.length === 0) {
         return res.status(400).json({
@@ -139,7 +144,8 @@ export class AppDocumentVerificationController {
         documentType,
         urls,
         documentSubType,
-        selfieUrl // Pass selfieUrl to service
+        selfieUrl, // Pass selfieUrl to service
+        selfieWithIdUrl // Pass selfieWithIdUrl to service
       });
 
       if (result.success) {
@@ -170,7 +176,7 @@ export class AppDocumentVerificationController {
   async uploadLandlordDocument(req: Request, res: Response, next: NextFunction) {
     try {
       const userId = (req as any).user._id;
-      const { documentType, urls, documentSubType, selfieUrl } = req.body;
+      const { documentType, urls, documentSubType, selfieUrl, selfieWithIdUrl } = req.body;
 
       if (!documentType || !urls || !Array.isArray(urls) || urls.length === 0) {
         return res.status(400).json({
@@ -180,7 +186,7 @@ export class AppDocumentVerificationController {
       }
 
       // Validate document type for landlords
-      const validLandlordDocuments = ["idDocument", "propertyProof", "propertyDocuments"];
+      const validLandlordDocuments = ["idDocument"];
       
       if (!validLandlordDocuments.includes(documentType)) {
         return res.status(400).json({
@@ -194,7 +200,8 @@ export class AppDocumentVerificationController {
         documentType,
         urls,
         documentSubType,
-        selfieUrl // Pass selfieUrl to service
+        selfieUrl, // Pass selfieUrl to service
+        selfieWithIdUrl // Pass selfieWithIdUrl to service
       });
 
       if (result.success) {
@@ -299,20 +306,27 @@ export class AppDocumentVerificationController {
       const requiredDocuments = DocumentVerificationService.getRequiredDocuments(userRole);
       const status = await DocumentVerificationService.getUserDocumentStatus(userId);
       
-      const progress = requiredDocuments.map(docType => {
+      // For tenants, also include optional documents in progress display
+      const allDocumentTypes = userRole === "tenant" 
+        ? [...requiredDocuments, "employmentLetter"]
+        : requiredDocuments;
+      
+      const progress = allDocumentTypes.map(docType => {
         const doc = status?.documents[docType as keyof typeof status.documents];
+        const isRequired = requiredDocuments.includes(docType);
         return {
           documentType: docType,
           isUploaded: !!doc,
+          isRequired: isRequired,
           uploadedAt: doc?.uploadedAt || null,
           verified: doc?.verified || false,
           description: this.getDocumentDescription(docType)
         };
       });
 
-      const completedCount = progress.filter(p => p.isUploaded).length;
-      const totalCount = progress.length;
-      const percentage = Math.round((completedCount / totalCount) * 100);
+      const completedRequiredCount = progress.filter(p => p.isRequired && p.isUploaded).length;
+      const totalRequiredCount = requiredDocuments.length;
+      const percentage = Math.round((completedRequiredCount / totalRequiredCount) * 100);
 
       res.status(200).json({
         success: true,
@@ -320,10 +334,10 @@ export class AppDocumentVerificationController {
         data: {
           progress,
           summary: {
-            completed: completedCount,
-            total: totalCount,
+            completed: completedRequiredCount,
+            total: totalRequiredCount,
             percentage,
-            canSubmit: completedCount === totalCount
+            canSubmit: completedRequiredCount === totalRequiredCount // Only required documents needed
           }
         }
       });
@@ -354,12 +368,10 @@ export class AppDocumentVerificationController {
         payslips: "Recent payslips (last 3 months)",
         utilityBills: "Utility bills (electricity, water, internet) in your name",
         bankStatements: "Bank statements (last 3 months)",
-        employmentLetter: "Employment verification letter from your employer"
+        employmentLetter: "Employment verification letter from your employer (optional)"
       },
       landlord: {
-        idDocument: "Government-issued ID (Passport, National ID, or Driver's License)",
-        propertyProof: "Property ownership documents (title deed, lease agreement)",
-        propertyDocuments: "Additional property documents (insurance, permits, etc.)"
+        idDocument: "Government-issued ID (Passport, National ID, or Driver's License)"
       }
     };
 
@@ -375,7 +387,7 @@ export class AppDocumentVerificationController {
       payslips: "Recent payslips",
       utilityBills: "Utility bills",
       bankStatements: "Bank statements",
-      employmentLetter: "Employment letter",
+      employmentLetter: "Employment letter (optional)",
       propertyProof: "Property ownership proof",
       propertyDocuments: "Property documents"
     };
@@ -433,19 +445,10 @@ export class AppDocumentVerificationController {
   private getLandlordNextSteps(documentType: string): string[] {
     const nextSteps: Record<string, string[]> = {
       idDocument: [
-        "Upload property ownership documents",
-        "Add property permits and licenses",
-        "Include property insurance documents"
-      ],
-      propertyProof: [
-        "Upload additional property documents",
-        "Include property permits and licenses",
-        "Add property insurance and tax receipts"
-      ],
-      propertyDocuments: [
-        "Review all uploaded documents",
-        "Ensure all documents are current and valid",
-        "Submit for verification review"
+        "Review your uploaded ID document",
+        "Ensure selfie and selfie with ID are clear",
+        "Submit for verification review",
+        "Note: Property ownership documents are uploaded per listing, not here"
       ]
     };
 

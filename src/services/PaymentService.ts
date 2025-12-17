@@ -48,11 +48,29 @@ class PaymentService {
       throw new Error("Invalid payment amount");
     }
     
+    // For rent payments, find the invoice for this rental's pending payment
+    let invoiceId = null;
+    if (data.paymentType === "rent" || (!data.paymentType && rental)) {
+      // Find the pending invoice for this rental that matches the payment amount
+      const { Invoice } = await import("../models/Invoice");
+      const pendingInvoice = await Invoice.findOne({
+        rentalId: rental._id,
+        tenantId: new Types.ObjectId(userId),
+        status: { $in: ["pending", "partially_paid", "overdue"] },
+        total: data.amount // Match the invoice total with payment amount
+      }).sort({ dueDate: 1 }); // Get the earliest due invoice
+      
+      if (pendingInvoice) {
+        invoiceId = pendingInvoice._id;
+      }
+    }
+
     // Create NEW payment record
     const newPayment = await Payment.create({
       rentalId: rental._id,
       agreementId: rental.agreementId,
       propertyId: rental.propertyId,
+      invoiceId: invoiceId, // Link payment to invoice
       landlordId: rental.landlordId,
       tenantId: rental.tenantId,
       
@@ -72,6 +90,44 @@ class PaymentService {
       status: data.paymentMethod === "in_app" ? "verified" : "paid",
       verifiedAt: data.paymentMethod === "in_app" ? new Date() : undefined
     });
+
+    // Update invoice status when payment is made
+    if (invoiceId) {
+      try {
+        const { Invoice } = await import("../models/Invoice");
+        const invoice = await Invoice.findById(invoiceId);
+        
+        if (invoice) {
+          const newAmountPaid = (invoice.amountPaid || 0) + data.amount;
+          const newAmountDue = invoice.total - newAmountPaid;
+          
+          // Update invoice status based on payment
+          let newStatus = invoice.status;
+          if (newAmountDue <= 0) {
+            newStatus = "fully_paid";
+            invoice.paymentDate = new Date();
+            invoice.paymentMethod = data.paymentMethod;
+            invoice.receiptNumber = newPayment.receiptNumber || null;
+          } else if (newAmountPaid > 0) {
+            newStatus = "partially_paid";
+          }
+          
+          await Invoice.findByIdAndUpdate(invoiceId, {
+            amountPaid: newAmountPaid,
+            amountDue: Math.max(0, newAmountDue),
+            status: newStatus,
+            paymentDate: newStatus === "fully_paid" ? new Date() : invoice.paymentDate,
+            paymentMethod: newStatus === "fully_paid" ? data.paymentMethod : invoice.paymentMethod,
+            receiptNumber: newStatus === "fully_paid" ? (newPayment.receiptNumber || null) : invoice.receiptNumber
+          });
+          
+          console.log(`✅ Updated invoice ${invoice.invoiceNumber} status to ${newStatus}`);
+        }
+      } catch (error) {
+        console.error(`Failed to update invoice ${invoiceId}:`, error);
+        // Continue even if invoice update fails
+      }
+    }
     
     // Calculate deductions before adding to escrow
     const deductions = await paymentCalculationService.calculateRentDeductions(

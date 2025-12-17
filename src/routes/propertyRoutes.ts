@@ -31,6 +31,9 @@ router.patch("/:id/status", authenticate, (req, res, next) => propertyController
 // Image management routes
 router.patch("/:id/images", authenticate, (req, res, next) => propertyController.updatePropertyImages(req, res, next));
 
+// Admin routes (must come before /:id routes to avoid conflicts)
+router.post("/admin/:id/verify", authenticate, authorize(["admin"]), (req, res, next) => propertyController.verifyPropertyListing(req, res, next));
+
 // Boost routes (must come before /:id routes to avoid conflicts)
 router.get("/boosts/history", authenticate, (req, res, next) => propertyController.getAllBoostsHistory(req, res, next));
 router.post("/:propertyId/boost", authenticate, authorize(["landlord"]), (req, res, next) => premiumBoostController.purchaseBoost(req, res, next));

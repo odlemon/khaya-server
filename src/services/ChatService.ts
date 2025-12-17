@@ -70,6 +70,11 @@ export class ChatService {
 
   /**
    * Get or create chat between tenant and landlord for a property
+   * 
+   * IMPORTANT: Each chat is tied to exactly ONE property.
+   * - One chat = One property (enforced at database level)
+   * - If a landlord has multiple properties, they will have separate chats for each property
+   * - The propertyId is required and unique per chat
    */
   async getOrCreateChat(tenantId: any, landlordId: any, propertyId: any): Promise<IChat> {
     // Convert to strings for consistent comparison
@@ -94,7 +99,9 @@ export class ChatService {
       participants: { $all: [tenantIdStr, landlordIdStr] },
       propertyId: propertyIdStr,
       isActive: true
-    }).populate("participants", "firstName lastName email role profile.avatar");
+    })
+    .populate("participants", "firstName lastName email role profile.avatar")
+    .populate("propertyId", "title address price images propertyType status bedrooms bathrooms landlordId");
 
     if (!chat) {
       // Create new chat
@@ -105,6 +112,7 @@ export class ChatService {
       });
       await chat.save();
       await chat.populate("participants", "firstName lastName email role profile.avatar");
+      await chat.populate("propertyId", "title address price images propertyType status bedrooms bathrooms landlordId");
       
       console.log('✅ Chat created successfully:', {
         chatId: chat._id,
@@ -118,6 +126,7 @@ export class ChatService {
 
   /**
    * Get user's chats (both as tenant and landlord)
+   * Handles old chats without propertyId by attempting to link them via Connections
    */
   async getUserChats(userId: string, userRole: string): Promise<any[]> {
     const chats = await Chat.find({
@@ -125,9 +134,20 @@ export class ChatService {
       isActive: true
     })
     .populate("participants", "firstName lastName email role profile.avatar")
-    .populate("propertyId", "title address price images")
+    .populate("propertyId", "title address price images propertyType status bedrooms bathrooms landlordId")
     .populate("lastMessage.senderId", "firstName lastName profile.avatar")
     .sort({ "lastMessage.timestamp": -1, updatedAt: -1 });
+
+    // Try to link old chats without propertyId (in background, don't block response)
+    const linkPromises = chats
+      .filter(chat => !chat.propertyId || !chat.propertyId._id)
+      .map(chat => this.tryLinkChatToProperty(chat).catch(err => {
+        console.error(`Error linking chat ${chat._id}:`, err);
+        return false;
+      }));
+    
+    // Don't await - let it run in background
+    Promise.all(linkPromises).catch(() => {}); // Silently handle errors
 
     // Compute unread counts per chat for this user (exclude user's own messages)
     const chatIds = chats.map((c: any) => c._id);
@@ -163,11 +183,12 @@ export class ChatService {
 
   /**
    * Get chat by ID with messages
+   * All chats should now have propertyId after migration
    */
   async getChatById(chatId: string, userId: string): Promise<{ chat: IChat; messages: IMessage[] }> {
     const chat = await Chat.findById(chatId)
       .populate("participants", "firstName lastName email role profile.avatar")
-      .populate("propertyId", "title address price images landlordId");
+      .populate("propertyId", "title address price images propertyType status bedrooms bathrooms landlordId");
 
     if (!chat) {
       throw new Error("Chat not found");
@@ -176,6 +197,12 @@ export class ChatService {
     // Verify user is participant (normalize both sides to string)
     if (!chat.participants.some((p: any) => p._id?.toString?.() === userId?.toString())) {
       throw new Error("Access denied");
+    }
+
+    // Ensure property data is populated (in case it wasn't populated properly)
+    if (chat.propertyId && !chat.propertyId._id && typeof chat.propertyId === 'object') {
+      // PropertyId exists but might not be populated, re-populate it
+      await chat.populate("propertyId", "title address price images propertyType status bedrooms bathrooms landlordId");
     }
 
     const messages = await Message.find({ chatId })
@@ -565,7 +592,7 @@ export class ChatService {
     .populate("chatId")
     .populate({
       path: "chatId",
-      populate: { path: "propertyId", select: "title address price images" }
+      populate: { path: "propertyId", select: "title address price images propertyType status bedrooms bathrooms landlordId" }
     })
     .sort({ createdAt: -1 });
 
@@ -588,7 +615,7 @@ export class ChatService {
     .populate("chatId")
     .populate({
       path: "chatId",
-      populate: { path: "propertyId", select: "title address price images" }
+      populate: { path: "propertyId", select: "title address price images propertyType status bedrooms bathrooms landlordId" }
     })
     .sort({ createdAt: -1 });
 
@@ -614,7 +641,7 @@ export class ChatService {
     .populate("chatId")
     .populate({
       path: "chatId",
-      populate: { path: "propertyId", select: "title address price images" }
+      populate: { path: "propertyId", select: "title address price images propertyType status bedrooms bathrooms landlordId" }
     })
     .sort({ createdAt: -1 });
 
@@ -627,7 +654,7 @@ export class ChatService {
     .populate("chatId")
     .populate({
       path: "chatId",
-      populate: { path: "propertyId", select: "title address price images" }
+      populate: { path: "propertyId", select: "title address price images propertyType status bedrooms bathrooms landlordId" }
     })
     .sort({ createdAt: -1 });
 
@@ -731,7 +758,9 @@ export class ChatService {
 
     if (isAlreadyParticipant) {
       // Already in chat, just return it
-      return await Chat.findById(chatId).populate("participants", "firstName lastName email role");
+      return await Chat.findById(chatId)
+        .populate("participants", "firstName lastName email role")
+        .populate("propertyId", "title address price images propertyType status bedrooms bathrooms landlordId");
     }
 
     // Add admin to participants (only if not already present)
@@ -750,7 +779,9 @@ export class ChatService {
       console.log(`Cleaned up duplicate participants in chat ${chatId}`);
     }
 
-    return await Chat.findById(chatId).populate("participants", "firstName lastName email role");
+    return await Chat.findById(chatId)
+      .populate("participants", "firstName lastName email role")
+      .populate("propertyId", "title address price images propertyType status bedrooms bathrooms landlordId");
   }
 
   /**
@@ -781,7 +812,7 @@ export class ChatService {
 
     const chats = await Chat.find({ isActive: true })
       .populate("participants", "firstName lastName email role")
-      .populate("propertyId", "title address images")
+      .populate("propertyId", "title address images propertyType status bedrooms bathrooms price landlordId")
       .sort({ updatedAt: -1 })
       .skip(skip)
       .limit(limit);
@@ -823,6 +854,79 @@ export class ChatService {
     });
 
     return visibleMessages;
+  }
+
+  /**
+   * Try to link an old chat (without propertyId) to a property using Connections
+   * This is a helper method for migrating old chats
+   */
+  private async tryLinkChatToProperty(chat: any): Promise<boolean> {
+    try {
+      const participants = chat.participants.map((p: any) => p._id?.toString?.() || p.toString());
+      
+      // Find tenant and landlord by role
+      let tenantId: string | null = null;
+      let landlordId: string | null = null;
+
+      for (const participant of chat.participants) {
+        const pId = participant._id?.toString?.() || participant.toString();
+        if ((participant as any).role === 'tenant') {
+          tenantId = pId;
+        } else if ((participant as any).role === 'landlord') {
+          landlordId = pId;
+        }
+      }
+
+      if (!tenantId || !landlordId) {
+        console.log(`⚠️ Cannot link chat ${chat._id}: Missing tenant or landlord`);
+        return false;
+      }
+
+      // Find an accepted connection between these users
+      const connection = await Connection.findOne({
+        tenantId: tenantId,
+        landlordId: landlordId,
+        status: "accepted",
+        isActive: true
+      }).sort({ createdAt: -1 }); // Get most recent connection
+
+      if (connection && connection.propertyId) {
+        console.log(`✅ Linking chat ${chat._id} to property ${connection.propertyId}`);
+        chat.propertyId = connection.propertyId;
+        await chat.save();
+        return true;
+      } else {
+        console.log(`⚠️ No connection found for chat ${chat._id}`);
+        return false;
+      }
+    } catch (error) {
+      console.error(`Error linking chat ${chat._id} to property:`, error);
+      return false;
+    }
+  }
+
+  /**
+   * Manually link a chat to a property (for admin/migration purposes)
+   */
+  async linkChatToProperty(chatId: string, propertyId: string): Promise<IChat> {
+    const chat = await Chat.findById(chatId);
+    if (!chat) {
+      throw new Error("Chat not found");
+    }
+
+    // Verify property exists
+    const property = await Property.findById(propertyId);
+    if (!property) {
+      throw new Error("Property not found");
+    }
+
+    chat.propertyId = propertyId as any;
+    await chat.save();
+    await chat.populate("propertyId", "title address price images propertyType status bedrooms bathrooms landlordId");
+    await chat.populate("participants", "firstName lastName email role profile.avatar");
+
+    console.log(`✅ Chat ${chatId} linked to property ${propertyId}`);
+    return chat;
   }
 }
 
