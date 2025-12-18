@@ -25,18 +25,39 @@ export interface IInvoice extends Document {
   property: {
     title: string;
     address: string;
+    fullAddress?: {
+      street?: string;
+      city?: string;
+      province?: string;
+      postalCode?: string;
+      country?: string;
+    };
+    propertyType?: string;
+    bedrooms?: number;
+    bathrooms?: number;
   };
   
   // Landlord details
   landlord: {
     name: string;
     email: string;
+    phone?: string;
+    address?: string;
   };
   
   // Tenant details
   tenant: {
     name: string;
     email: string;
+    phone?: string;
+    address?: string;
+  };
+  
+  // Rental period details
+  rentalPeriod?: {
+    startDate: Date;
+    endDate: Date;
+    monthlyRent: number;
   };
   
   // Line items
@@ -130,15 +151,34 @@ const invoiceSchema = new Schema<IInvoice>(
     },
     property: {
       title: { type: String, required: true },
-      address: { type: String, required: true }
+      address: { type: String, required: true },
+      fullAddress: {
+        street: { type: String },
+        city: { type: String },
+        province: { type: String },
+        postalCode: { type: String },
+        country: { type: String }
+      },
+      propertyType: { type: String },
+      bedrooms: { type: Number },
+      bathrooms: { type: Number }
     },
     landlord: {
       name: { type: String, required: true },
-      email: { type: String, required: true }
+      email: { type: String, required: true },
+      phone: { type: String },
+      address: { type: String }
     },
     tenant: {
       name: { type: String, required: true },
-      email: { type: String, required: true }
+      email: { type: String, required: true },
+      phone: { type: String },
+      address: { type: String }
+    },
+    rentalPeriod: {
+      startDate: { type: Date },
+      endDate: { type: Date },
+      monthlyRent: { type: Number }
     },
     lineItems: [{
       description: { type: String, required: true },

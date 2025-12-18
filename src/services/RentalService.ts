@@ -60,6 +60,19 @@ export class RentalService {
    * In test mode: 1 month = 10 minutes
    */
   async createPaymentSchedule(rental: IRental): Promise<void> {
+    // Check if payment schedule already exists for this rental
+    const existingPayments = await Payment.countDocuments({ 
+      rentalId: rental._id,
+      paymentType: "rent"
+    });
+    
+    if (existingPayments > 0) {
+      console.log(`⚠️  Payment schedule already exists for rental ${rental._id}`);
+      console.log(`   Found ${existingPayments} existing payments. Skipping schedule creation.`);
+      console.log(`   If you need to recreate, delete existing payments first.`);
+      return;
+    }
+
     let startDate = new Date(rental.startDate);
     const endDate = new Date(rental.endDate);
     

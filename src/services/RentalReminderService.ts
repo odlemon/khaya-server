@@ -165,31 +165,53 @@ export class RentalReminderService {
           logger.info(`   ✅ ${reminderType} reminder needs to be sent`);
 
           // Check if invoice exists for this payment (from previous reminder)
+          // Also check by rentalId + dueDate to prevent duplicates for same period
           let invoiceId = null;
-          const existingInvoice = await Invoice.findOne({ paymentId: payment._id });
+          const existingInvoice = await Invoice.findOne({ 
+            paymentId: payment._id 
+          });
           
-          // If this is the first reminder (7_days), create invoice
-          if (reminderType === "7_days" && !existingInvoice) {
+          // Also check if there's an invoice for this rental with the same due date (prevent duplicates)
+          const duplicateInvoice = existingInvoice ? null : await Invoice.findOne({
+            rentalId: payment.rentalId,
+            dueDate: payment.dueDate,
+            status: { $in: ["pending", "partially_paid", "overdue"] }
+          });
+          
+          if (duplicateInvoice) {
+            logger.warn(`   ⚠️  Found duplicate invoice for same rental and due date: ${duplicateInvoice.invoiceNumber}`);
+            logger.warn(`   ⚠️  Payment ${payment._id} due ${payment.dueDate.toISOString()} already has invoice ${duplicateInvoice._id}`);
+            invoiceId = duplicateInvoice._id;
+            logger.info(`   📄 Using existing invoice: ${duplicateInvoice.invoiceNumber} (ID: ${invoiceId})`);
+          } else if (existingInvoice) {
+            // Use existing invoice for subsequent reminders
+            invoiceId = existingInvoice._id;
+            logger.info(`   📄 Using existing invoice: ${existingInvoice.invoiceNumber} (ID: ${invoiceId})`);
+          } else if (reminderType === "7_days") {
+            // If this is the first reminder (7_days), create invoice
             logger.info(`   📄 Creating invoice for payment ${payment._id} (first reminder)`);
             try {
               const invoice = await invoiceService.generateInvoiceForPayment(
                 payment._id.toString(),
                 payment.tenantId.toString()
               );
-              // Find the created invoice to get its ID
-              const createdInvoice = await Invoice.findOne({ invoiceNumber: invoice.invoiceNumber });
+              // Find the created invoice to get its ID (double-check after creation)
+              const createdInvoice = await Invoice.findOne({ 
+                $or: [
+                  { invoiceNumber: invoice.invoiceNumber },
+                  { paymentId: payment._id }
+                ]
+              });
               if (createdInvoice) {
                 invoiceId = createdInvoice._id;
                 logger.info(`   ✅ Invoice created: ${invoice.invoiceNumber} (ID: ${invoiceId})`);
+              } else {
+                logger.warn(`   ⚠️  Invoice creation returned but not found in DB: ${invoice.invoiceNumber}`);
               }
             } catch (error: any) {
               logger.error(`   ❌ Failed to create invoice for payment ${payment._id}:`, error.message);
               // Continue with reminder even if invoice creation fails
             }
-          } else if (existingInvoice) {
-            // Use existing invoice for subsequent reminders
-            invoiceId = existingInvoice._id;
-            logger.info(`   📄 Using existing invoice: ${existingInvoice.invoiceNumber} (ID: ${invoiceId})`);
           }
 
           // Send reminder
