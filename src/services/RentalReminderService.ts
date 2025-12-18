@@ -25,42 +25,103 @@ export class RentalReminderService {
       logger.info(`🔄 Test Mode: ${TEST_MODE ? 'ENABLED (7 days = 4 minutes)' : 'DISABLED (normal days)'}`);
       logger.info("🔄 Checking for upcoming rent payments that need reminders...");
 
-      // In test mode: look ahead 1 month (10 minutes) to catch all payments
-      // In production: look ahead 30 days to catch all payments
-      const searchWindow = TEST_MODE 
-        ? addMonths(now, 1) // Test mode: 1 month = 10 minutes
-        : (() => {
-            const date = new Date(now);
-            date.setDate(date.getDate() + 30);
-            return date;
-          })();
-
-      logger.info(`🔄 Looking for payments due between: ${now.toISOString()} and ${searchWindow.toISOString()}`);
-
-      // Find all pending payments with due dates within the search window
-      // We'll filter by reminder timing later
-      const upcomingPayments = await Payment.find({
+      // DEBUG: Check all pending payments first
+      const allPendingPayments = await Payment.find({
         status: "pending",
-        dueDate: {
-          $gte: now,
-          $lte: searchWindow
-        },
         paymentType: "rent"
-      })
-        .populate({
-          path: "rentalId",
-          select: "propertyId landlordId tenantId",
-          populate: [
-            { path: "propertyId", select: "title address" },
-            { path: "landlordId", select: "firstName lastName email" },
-            { path: "tenantId", select: "firstName lastName email" }
-          ]
-        })
-        .populate("propertyId", "title address")
-        .populate("tenantId", "firstName lastName email")
-        .populate("landlordId", "firstName lastName email");
+      }).select("_id dueDate amount rentalId tenantId").limit(10);
+      
+      logger.info(`🔍 DEBUG: Found ${allPendingPayments.length} total pending rent payments in database`);
+      if (allPendingPayments.length > 0) {
+        logger.info(`🔍 DEBUG: Pending Payment Details:`);
+        allPendingPayments.forEach((p, idx) => {
+          const dueDate = new Date(p.dueDate);
+          const minutesUntilDue = (dueDate.getTime() - now.getTime()) / (1000 * 60);
+          logger.info(`   ${idx + 1}. Payment ID: ${p._id}`);
+          logger.info(`      Due Date: ${dueDate.toISOString()}`);
+          logger.info(`      Minutes Until Due: ${minutesUntilDue.toFixed(2)}`);
+          logger.info(`      Amount: K${p.amount}`);
+        });
+      }
 
-      logger.info(`📊 Found ${upcomingPayments.length} upcoming rent payments`);
+      // In test mode: Get ALL pending payments and filter by calculated "test days"
+      // In production: look ahead 30 days
+      let upcomingPayments;
+      
+      if (TEST_MODE) {
+        // Test mode: Get all pending payments, we'll filter by test timing logic
+        logger.info(`🔄 Test Mode: Fetching ALL pending rent payments (will filter by test timing)`);
+        upcomingPayments = await Payment.find({
+          status: "pending",
+          paymentType: "rent"
+        })
+          .populate({
+            path: "rentalId",
+            select: "propertyId landlordId tenantId",
+            populate: [
+              { path: "propertyId", select: "title address" },
+              { path: "landlordId", select: "firstName lastName email" },
+              { path: "tenantId", select: "firstName lastName email" }
+            ]
+          })
+          .populate("propertyId", "title address")
+          .populate("tenantId", "firstName lastName email")
+          .populate("landlordId", "firstName lastName email");
+      } else {
+        // Production mode: Normal date-based filtering
+        const searchWindow = (() => {
+          const date = new Date(now);
+          date.setDate(date.getDate() + 30);
+          return date;
+        })();
+        
+        const overdueWindow = (() => {
+          const date = new Date(now);
+          date.setDate(date.getDate() - 7);
+          return date;
+        })();
+        
+        logger.info(`🔄 Production Mode: Looking for payments due between ${overdueWindow.toISOString()} and ${searchWindow.toISOString()}`);
+        
+        upcomingPayments = await Payment.find({
+          status: "pending",
+          dueDate: {
+            $gte: overdueWindow,
+            $lte: searchWindow
+          },
+          paymentType: "rent"
+        })
+          .populate({
+            path: "rentalId",
+            select: "propertyId landlordId tenantId",
+            populate: [
+              { path: "propertyId", select: "title address" },
+              { path: "landlordId", select: "firstName lastName email" },
+              { path: "tenantId", select: "firstName lastName email" }
+            ]
+          })
+          .populate("propertyId", "title address")
+          .populate("tenantId", "firstName lastName email")
+          .populate("landlordId", "firstName lastName email");
+      }
+
+      // In test mode: Filter payments by test timing (only process those within test window)
+      if (TEST_MODE) {
+        const filteredPayments = [];
+        for (const payment of upcomingPayments) {
+          const daysUntilDue = this.calculateDaysUntilDue(payment.dueDate);
+          // Only include payments that are:
+          // - Due within next 1 month (10 minutes) = daysUntilDue <= 17 (10 min / 0.57 min per day)
+          // - Or overdue within last 7 days (4 minutes) = daysUntilDue >= -7
+          if (daysUntilDue <= 17 && daysUntilDue >= -7) {
+            filteredPayments.push(payment);
+          }
+        }
+        upcomingPayments = filteredPayments;
+        logger.info(`📊 Test Mode: Filtered to ${upcomingPayments.length} payments within test window (out of ${allPendingPayments.length} total)`);
+      } else {
+        logger.info(`📊 Found ${upcomingPayments.length} upcoming rent payments`);
+      }
       
       if (upcomingPayments.length > 0) {
         logger.info(`📊 Payment Details:`);
@@ -236,19 +297,33 @@ export class RentalReminderService {
    */
   private calculateDaysUntilDue(dueDate: Date): number {
     const now = new Date();
-    const due = new Date(dueDate);
+    let due = new Date(dueDate);
     
     if (TEST_MODE) {
-      // Test mode: calculate minutes and convert to "days" for comparison
+      // Test mode: If payment is due more than 1 hour in the future, normalize it to 10 minutes (1 month)
+      // This handles cases where agreements were created with real future dates
       const diffTime = due.getTime() - now.getTime();
       const diffMinutes = diffTime / (1000 * 60);
+      const oneHourInMinutes = 60;
+      
+      if (diffMinutes > oneHourInMinutes) {
+        // Payment is way in the future - normalize to 10 minutes (1 month in test mode)
+        logger.info(`   ⚠️  Test Mode: Payment due date ${due.toISOString()} is ${diffMinutes.toFixed(2)} minutes away (too far)`);
+        logger.info(`   📅 Normalizing to: 10 minutes from now (1 month in test mode)`);
+        due = new Date(now.getTime() + 10 * 60 * 1000); // 10 minutes from now
+      }
+      
+      // Calculate minutes and convert to "days" for comparison
+      const normalizedDiffTime = due.getTime() - now.getTime();
+      const normalizedDiffMinutes = normalizedDiffTime / (1000 * 60);
       
       // Convert minutes to "days" using test ratio (7 days = 4 minutes)
       // So 1 "day" = 4/7 minutes ≈ 0.57 minutes
       const minutesPerDay = 4 / 7;
-      const daysUntilDue = Math.ceil(diffMinutes / minutesPerDay);
+      const daysUntilDue = Math.ceil(normalizedDiffMinutes / minutesPerDay);
       
-      return daysUntilDue >= 0 ? daysUntilDue : 0;
+      // Return negative values for overdue payments (don't clamp to 0)
+      return daysUntilDue;
     }
     
     // Production mode: normal day calculation
@@ -258,7 +333,7 @@ export class RentalReminderService {
     const diffTime = due.getTime() - now.getTime();
     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
     
-    return diffDays >= 0 ? diffDays : 0;
+    return diffDays;
   }
 
   /**
@@ -274,11 +349,14 @@ export class RentalReminderService {
       // - 3-day reminder: payment due in ~1.7 minutes (3 days = 1.7 minutes)
       // - 1-day reminder: payment due in ~0.57 minutes (1 day = 0.57 minutes)
       // Allow some flexibility for timing (±0.5 minutes)
+      // Also send reminders for overdue payments (negative daysUntilDue)
       if (daysUntilDue >= 6 && daysUntilDue <= 8) {  // ~4 minutes before (7 days)
         types.push("7_days");
       } else if (daysUntilDue >= 1.5 && daysUntilDue <= 2.5) {  // ~1.7 minutes before (3 days)
         types.push("3_days");
-      } else if (daysUntilDue >= 0 && daysUntilDue <= 1) {  // ~0.57 minutes before (1 day)
+      } else if (daysUntilDue >= -1 && daysUntilDue <= 1) {  // ~0.57 minutes before/after (1 day) - include overdue
+        types.push("1_day");
+      } else if (daysUntilDue < -1 && daysUntilDue >= -7) {  // Overdue but within 7 days - send 1_day reminder
         types.push("1_day");
       }
     } else {
@@ -405,3 +483,4 @@ export class RentalReminderService {
 }
 
 export const rentalReminderService = new RentalReminderService();
+

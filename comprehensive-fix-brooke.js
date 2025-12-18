@@ -96,3 +96,4 @@ function log(msg) {
     process.exit(1);
   }
 })();
+

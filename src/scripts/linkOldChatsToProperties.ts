@@ -137,3 +137,4 @@ async function linkOldChatsToProperties() {
 // Run the migration
 linkOldChatsToProperties();
 
+

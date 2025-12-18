@@ -152,3 +152,4 @@ async function resetFaraiDocuments() {
 
 // Run the script
 resetFaraiDocuments();
+

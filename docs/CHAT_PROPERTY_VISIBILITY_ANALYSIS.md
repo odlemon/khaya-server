@@ -129,3 +129,4 @@ The frontend should be able to access:
 4. ⏳ Test with multiple properties per landlord
 5. ⏳ Verify frontend can display property info
 
+
