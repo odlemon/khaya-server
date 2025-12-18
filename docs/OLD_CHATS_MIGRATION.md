@@ -240,3 +240,4 @@ Expected: Should return chat with property data (either from existing propertyId
 - `src/routes/chatRoutes.ts` - Admin route for manual linking
 - `src/scripts/linkOldChatsToProperties.ts` - Migration script
 
+

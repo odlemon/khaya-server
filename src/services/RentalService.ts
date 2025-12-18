@@ -60,8 +60,22 @@ export class RentalService {
    * In test mode: 1 month = 10 minutes
    */
   async createPaymentSchedule(rental: IRental): Promise<void> {
-    const startDate = new Date(rental.startDate);
+    let startDate = new Date(rental.startDate);
     const endDate = new Date(rental.endDate);
+    
+    // In test mode: if startDate is in the future (more than 1 hour), adjust it to now + 10 minutes
+    // This ensures payments are within the test window
+    if (TEST_MODE) {
+      const now = new Date();
+      const oneHourFromNow = new Date(now.getTime() + 60 * 60 * 1000);
+      
+      if (startDate > oneHourFromNow) {
+        console.log(`⚠️  Test Mode: Agreement startDate (${startDate.toISOString()}) is too far in future.`);
+        console.log(`   Adjusting first payment to: ${now.toISOString()} (now)`);
+        startDate = new Date(now); // Set first payment to now
+      }
+    }
+    
     let currentDate = new Date(startDate);
 
     console.log(`📊 Payment Schedule Creation Started:`);
@@ -83,7 +97,8 @@ export class RentalService {
         paymentType: "rent",
         amount: rental.monthlyRent,
         dueDate: new Date(currentDate),
-        status: "pending"
+        status: "pending",
+        paymentMethod: "in_app" // Required field - default to in_app for scheduled payments
       });
 
       paymentCount++;

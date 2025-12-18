@@ -218,3 +218,4 @@ async function linkChatsToPropertiesFromAgreements() {
 // Run the migration
 linkChatsToPropertiesFromAgreements();
 
+
