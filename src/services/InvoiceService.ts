@@ -20,14 +20,33 @@ export interface InvoiceData {
   property: {
     title: string;
     address: string;
+    fullAddress?: {
+      street?: string;
+      city?: string;
+      province?: string;
+      postalCode?: string;
+      country?: string;
+    };
+    propertyType?: string;
+    bedrooms?: number;
+    bathrooms?: number;
   };
   landlord: {
     name: string;
     email: string;
+    phone?: string;
+    address?: string;
   };
   tenant: {
     name: string;
     email: string;
+    phone?: string;
+    address?: string;
+  };
+  rentalPeriod?: {
+    startDate: Date;
+    endDate: Date;
+    monthlyRent: number;
   };
   lineItems: Array<{
     description: string;
@@ -63,10 +82,10 @@ export class InvoiceService {
 
       // Fetch payment with all related data
       const payment = await Payment.findById(paymentId)
-        .populate("rentalId", "propertyId landlordId tenantId monthlyRent")
-        .populate("propertyId", "title address")
-        .populate("landlordId", "firstName lastName email")
-        .populate("tenantId", "firstName lastName email")
+        .populate("rentalId", "propertyId landlordId tenantId monthlyRent startDate endDate")
+        .populate("propertyId", "title address propertyType bedrooms bathrooms")
+        .populate("landlordId", "firstName lastName email phone address")
+        .populate("tenantId", "firstName lastName email phone address")
         .populate("agreementId", "rentAmount depositAmount startDate endDate");
 
       if (!payment) {
@@ -85,8 +104,21 @@ export class InvoiceService {
 
       // Get property address
       const propertyAddress = property?.address
-        ? `${property.address.street || ""}, ${property.address.city || ""}`.trim()
+        ? typeof property.address === 'string' 
+          ? property.address
+          : `${property.address.street || ""}, ${property.address.city || ""}`.trim()
         : property?.title || "Property";
+
+      // Get full property address details
+      const propertyFullAddress = property?.address && typeof property.address === 'object'
+        ? {
+            street: property.address.street || "",
+            city: property.address.city || "",
+            province: property.address.province || "",
+            postalCode: property.address.postalCode || "",
+            country: property.address.country || "Zambia"
+          }
+        : undefined;
 
       // Calculate deductions if payment is verified/paid
       let deductions = null;
@@ -165,16 +197,29 @@ export class InvoiceService {
         amountDue: amountDue,
         property: {
           title: property?.title || "Property",
-          address: propertyAddress
+          address: propertyAddress,
+          fullAddress: propertyFullAddress,
+          propertyType: property?.propertyType || undefined,
+          bedrooms: property?.bedrooms || undefined,
+          bathrooms: property?.bathrooms || undefined
         },
         landlord: {
           name: landlord ? `${landlord.firstName} ${landlord.lastName}` : "Landlord",
-          email: landlord?.email || ""
+          email: landlord?.email || "",
+          phone: landlord?.phone || undefined,
+          address: landlord?.address || undefined
         },
         tenant: {
           name: tenant ? `${tenant.firstName} ${tenant.lastName}` : "Tenant",
-          email: tenant?.email || ""
+          email: tenant?.email || "",
+          phone: tenant?.phone || undefined,
+          address: tenant?.address || undefined
         },
+        rentalPeriod: rental ? {
+          startDate: rental.startDate || new Date(),
+          endDate: rental.endDate || new Date(),
+          monthlyRent: rental.monthlyRent || payment.amount
+        } : undefined,
         lineItems,
         subtotal,
         lateFee,
@@ -211,12 +256,22 @@ export class InvoiceService {
       status: invoice.status,
       amountPaid: invoice.amountPaid || 0,
       amountDue: invoice.amountDue || invoice.total,
-      property: invoice.property,
-      landlord: invoice.landlord,
-      tenant: invoice.tenant,
-      lineItems: invoice.lineItems,
+      property: invoice.property || {
+        title: "Property",
+        address: ""
+      },
+      landlord: invoice.landlord || {
+        name: "Landlord",
+        email: ""
+      },
+      tenant: invoice.tenant || {
+        name: "Tenant",
+        email: ""
+      },
+      rentalPeriod: invoice.rentalPeriod,
+      lineItems: invoice.lineItems || [],
       subtotal: invoice.subtotal,
-      lateFee: invoice.lateFee,
+      lateFee: invoice.lateFee || 0,
       total: invoice.total,
       paymentMethod: invoice.paymentMethod,
       receiptNumber: invoice.receiptNumber,
