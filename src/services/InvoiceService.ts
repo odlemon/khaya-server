@@ -99,25 +99,27 @@ export class InvoiceService {
         throw new Error("Payment not found");
       }
 
+      // Extract related objects
+      const property = payment.propertyId as any;
+      const landlord = payment.landlordId as any;
+      const tenant = payment.tenantId as any;
+      const rental = payment.rentalId as any;
+
       // Get tenant ID from payment (handle both populated and unpopulated cases)
       const paymentTenantId = payment.tenantId?._id?.toString() || payment.tenantId?.toString() || payment.tenantId;
       
       // If rental is populated, try to get tenantId from rental as fallback
-      const actualTenantId = paymentTenantId || rental?.tenantId?._id?.toString() || rental?.tenantId?.toString() || rental?.tenantId;
+      const rentalTenantId = rental?.tenantId?._id?.toString() || rental?.tenantId?.toString() || rental?.tenantId;
+      const actualTenantId = paymentTenantId || rentalTenantId;
       
       logger.info(`📄 Payment tenantId: ${paymentTenantId}`);
-      logger.info(`📄 Rental tenantId: ${rental?.tenantId?._id?.toString() || rental?.tenantId?.toString() || rental?.tenantId}`);
+      logger.info(`📄 Rental tenantId: ${rentalTenantId}`);
       logger.info(`📄 Using tenantId: ${actualTenantId}`);
       
       if (!actualTenantId) {
         logger.error(`❌ No tenantId found in payment or rental`);
         throw new Error("Tenant ID not found in payment or rental");
       }
-
-      const property = payment.propertyId as any;
-      const landlord = payment.landlordId as any;
-      const tenant = payment.tenantId as any;
-      const rental = payment.rentalId as any;
 
       // Get property address
       const propertyAddress = property?.address
