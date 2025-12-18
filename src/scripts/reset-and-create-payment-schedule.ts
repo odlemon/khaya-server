@@ -9,7 +9,7 @@ import { Invoice } from '../models/Invoice';
 import { Payment } from '../models/Payment';
 import { RentalReminder } from '../models/RentalReminder';
 import { Rental } from '../models/Rental';
-import { addMonths } from '../config/testMode';
+import { addMonths, addDays } from '../config/testMode';
 import dotenv from 'dotenv';
 
 dotenv.config();
@@ -80,8 +80,12 @@ async function resetAndCreate() {
     console.log(`   New startDate: ${newStartDate.toISOString()}`);
     console.log(`   New endDate: ${newEndDate.toISOString()}\n`);
 
-    // Step 4: Create ONE payment (due NOW)
+    // Step 4: Create ONE payment (due in 4 minutes = 7 days in test mode)
+    // This way the 7-day reminder will trigger NOW
     console.log('📅 Step 4: Creating single payment...\n');
+    
+    // Payment due in 7 days = 4 minutes in test mode
+    const paymentDueDate = addDays(now, 7); // 7 days = 4 minutes in test mode
     
     const payment = await Payment.create({
       rentalId: rental._id,
@@ -91,28 +95,30 @@ async function resetAndCreate() {
       tenantId: rental.tenantId,
       paymentType: 'rent',
       amount: rental.monthlyRent,
-      dueDate: new Date(now), // Due NOW
+      dueDate: paymentDueDate, // Due in 4 minutes (7 days in test mode)
       status: 'pending',
       paymentMethod: 'in_app'
     });
 
+    const minutesUntilDue = (paymentDueDate.getTime() - now.getTime()) / (1000 * 60);
     console.log(`   ✅ Payment created: ${payment._id}`);
-    console.log(`   Due date: ${now.toISOString()} (NOW)\n`);
+    console.log(`   Due date: ${paymentDueDate.toISOString()} (in ${minutesUntilDue.toFixed(2)} minutes)\n`);
 
     // Update rental stats
     rental.stats.totalPaymentsDue = 1;
+    rental.nextPaymentDue = paymentDueDate;
     await rental.save();
 
     console.log(`\n✅ Single payment created:`);
     console.log(`   - Payment ID: ${payment._id}`);
-    console.log(`   - Due date: ${now.toISOString()} (NOW)`);
+    console.log(`   - Due date: ${paymentDueDate.toISOString()} (in ${minutesUntilDue.toFixed(2)} minutes)`);
     console.log(`   - Amount: K${rental.monthlyRent}\n`);
     console.log(`\n🎯 Test timeline:`);
-    console.log(`   - Payment due: NOW`);
-    console.log(`   - 7-day reminder (4 min before): In ~6 minutes`);
-    console.log(`   - 3-day reminder (1.7 min before): In ~8.3 minutes`);
-    console.log(`   - 1-day reminder (0.57 min before): In ~9.4 minutes`);
-    console.log(`\n✅ All done! The cron job will trigger reminders automatically.\n`);
+    console.log(`   - Payment due: In ${minutesUntilDue.toFixed(2)} minutes (7 days in test mode)`);
+    console.log(`   - 7-day reminder (4 min before): Should trigger NOW ✅`);
+    console.log(`   - 3-day reminder (1.7 min before): In ~2.3 minutes`);
+    console.log(`   - 1-day reminder (0.57 min before): In ~3.4 minutes`);
+    console.log(`\n✅ All done! The cron job will trigger the 7-day reminder immediately.\n`);
 
     await mongoose.disconnect();
     console.log('✅ Disconnected from MongoDB\n');

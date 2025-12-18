@@ -190,11 +190,19 @@ export class RentalReminderService {
           } else if (reminderType === "7_days") {
             // If this is the first reminder (7_days), create invoice
             logger.info(`   📄 Creating invoice for payment ${payment._id} (first reminder)`);
+            logger.info(`   📄 Payment tenantId: ${payment.tenantId} (type: ${typeof payment.tenantId})`);
+            logger.info(`   📄 Payment tenantId string: ${payment.tenantId?.toString() || 'MISSING'}`);
             try {
+              const tenantIdStr = payment.tenantId?.toString() || payment.tenantId?._id?.toString() || payment.tenantId;
+              if (!tenantIdStr) {
+                throw new Error(`Missing tenantId for payment ${payment._id}`);
+              }
+              logger.info(`   📄 Calling generateInvoiceForPayment with paymentId: ${payment._id.toString()}`);
+              // tenantId will be extracted from payment/rental in the service
               const invoice = await invoiceService.generateInvoiceForPayment(
-                payment._id.toString(),
-                payment.tenantId.toString()
+                payment._id.toString()
               );
+              logger.info(`   📄 Invoice service returned: ${JSON.stringify({ invoiceNumber: invoice.invoiceNumber })}`);
               // Find the created invoice to get its ID (double-check after creation)
               const createdInvoice = await Invoice.findOne({ 
                 $or: [
@@ -206,10 +214,13 @@ export class RentalReminderService {
                 invoiceId = createdInvoice._id;
                 logger.info(`   ✅ Invoice created: ${invoice.invoiceNumber} (ID: ${invoiceId})`);
               } else {
-                logger.warn(`   ⚠️  Invoice creation returned but not found in DB: ${invoice.invoiceNumber}`);
+                logger.error(`   ❌ Invoice creation returned but not found in DB: ${invoice.invoiceNumber}`);
+                logger.error(`   ❌ Searched for invoiceNumber: ${invoice.invoiceNumber} or paymentId: ${payment._id}`);
               }
             } catch (error: any) {
-              logger.error(`   ❌ Failed to create invoice for payment ${payment._id}:`, error.message);
+              logger.error(`   ❌ Failed to create invoice for payment ${payment._id}:`);
+              logger.error(`   ❌ Error message: ${error.message}`);
+              logger.error(`   ❌ Error stack: ${error.stack}`);
               // Continue with reminder even if invoice creation fails
             }
           }
