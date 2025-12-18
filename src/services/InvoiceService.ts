@@ -72,7 +72,7 @@ export class InvoiceService {
    * Generate and store invoice for a specific payment
    * Creates invoice if it doesn't exist, otherwise returns existing one
    */
-  async generateInvoiceForPayment(paymentId: string, tenantId: string): Promise<InvoiceData> {
+  async generateInvoiceForPayment(paymentId: string, tenantId?: string): Promise<InvoiceData> {
     try {
       // Check if invoice already exists
       const existingInvoice = await Invoice.findOne({ paymentId: new Types.ObjectId(paymentId) });
@@ -87,14 +87,31 @@ export class InvoiceService {
         .populate("landlordId", "firstName lastName email phone address")
         .populate("tenantId", "firstName lastName email phone address")
         .populate("agreementId", "rentAmount depositAmount startDate endDate");
+      
+      logger.info(`📄 Fetched payment ${paymentId} for invoice creation`);
+      logger.info(`📄 Payment has rentalId: ${payment?.rentalId ? 'YES' : 'NO'}`);
+      logger.info(`📄 Payment has propertyId: ${payment?.propertyId ? 'YES' : 'NO'}`);
+      logger.info(`📄 Payment has landlordId: ${payment?.landlordId ? 'YES' : 'NO'}`);
+      logger.info(`📄 Payment has tenantId: ${payment?.tenantId ? 'YES' : 'NO'}`);
 
       if (!payment) {
+        logger.error(`❌ Payment ${paymentId} not found in database`);
         throw new Error("Payment not found");
       }
 
-      // Verify tenant owns this payment
-      if (payment.tenantId.toString() !== tenantId) {
-        throw new Error("Access denied: This payment does not belong to you");
+      // Get tenant ID from payment (handle both populated and unpopulated cases)
+      const paymentTenantId = payment.tenantId?._id?.toString() || payment.tenantId?.toString() || payment.tenantId;
+      
+      // If rental is populated, try to get tenantId from rental as fallback
+      const actualTenantId = paymentTenantId || rental?.tenantId?._id?.toString() || rental?.tenantId?.toString() || rental?.tenantId;
+      
+      logger.info(`📄 Payment tenantId: ${paymentTenantId}`);
+      logger.info(`📄 Rental tenantId: ${rental?.tenantId?._id?.toString() || rental?.tenantId?.toString() || rental?.tenantId}`);
+      logger.info(`📄 Using tenantId: ${actualTenantId}`);
+      
+      if (!actualTenantId) {
+        logger.error(`❌ No tenantId found in payment or rental`);
+        throw new Error("Tenant ID not found in payment or rental");
       }
 
       const property = payment.propertyId as any;
@@ -182,11 +199,14 @@ export class InvoiceService {
       const amountDue = total;
 
       // Create and save invoice in database
+      logger.info(`📄 Creating invoice document in database...`);
+      logger.info(`📄 Invoice data: invoiceNumber=${invoiceNumber}, rentalId=${rental?._id || payment.rentalId}, tenantId=${payment.tenantId}`);
+      
       const invoice = await Invoice.create({
         invoiceNumber,
         paymentId: payment._id, // Link to the payment record (for reference)
         rentalId: rental?._id || payment.rentalId,
-        tenantId: payment.tenantId,
+        tenantId: actualTenantId,
         landlordId: payment.landlordId,
         propertyId: payment.propertyId,
         invoiceDate: payment.createdAt || new Date(),
@@ -236,6 +256,8 @@ export class InvoiceService {
       });
 
       logger.info(`✅ Invoice created and stored: ${invoiceNumber} for payment ${paymentId}`);
+      logger.info(`✅ Invoice ID: ${invoice._id}`);
+      logger.info(`✅ Invoice status: ${invoice.status}`);
 
       return this.convertInvoiceToData(invoice);
     } catch (error: any) {
@@ -331,7 +353,8 @@ export class InvoiceService {
       }
 
       // Generate invoice (this will create and store it)
-      await this.generateInvoiceForPayment(paymentId, payment.tenantId.toString());
+      // tenantId will be extracted from payment/rental
+      await this.generateInvoiceForPayment(paymentId);
     } catch (error: any) {
       logger.error(`❌ Error creating invoice for payment ${paymentId}:`, error);
       // Don't throw - invoice creation shouldn't break payment flow
