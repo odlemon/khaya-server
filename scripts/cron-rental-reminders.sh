@@ -30,3 +30,4 @@ fi
 
 echo "[$TIMESTAMP] ---" >> "$LOG_FILE"
 
+

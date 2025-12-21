@@ -150,3 +150,4 @@ async function verifyUserDocumentsStatus() {
 // Run the script
 verifyUserDocumentsStatus();
 
+

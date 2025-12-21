@@ -130,3 +130,4 @@ The frontend should be able to access:
 5. ⏳ Verify frontend can display property info
 
 
+

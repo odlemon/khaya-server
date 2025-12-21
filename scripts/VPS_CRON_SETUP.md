@@ -262,3 +262,4 @@ curl https://your-app.vercel.app/api/cron/rental-reminders
 3. Verify reminders are being sent
 4. Once confirmed working, you can remove the Vercel cron from `vercel.json` (or keep it for backup)
 
+
