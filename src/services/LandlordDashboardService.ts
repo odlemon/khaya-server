@@ -5,6 +5,10 @@ import { Rental } from "../models/Rental";
 import { Agreement } from "../models/Agreement";
 import { Property } from "../models/Property";
 import { CommissionService } from "./CommissionService";
+import { EscrowTransaction } from "../models/Escrow";
+import { LandlordPreferences } from "../models/LandlordPreferences";
+import { RevenueSource } from "../models/RevenueSource";
+import { landlordSubscriptionService } from "./LandlordSubscriptionService";
 import { Types } from "mongoose";
 
 export class LandlordDashboardService {
@@ -308,5 +312,178 @@ export class LandlordDashboardService {
     );
 
     return propertyPerformance;
+  }
+
+  /**
+   * Get earnings breakdown by property for a landlord
+   * Uses escrow transactions to show actual distributed amounts only
+   */
+  async getEarningsByProperty(landlordId: string, filters?: {
+    startDate?: Date;
+    endDate?: Date;
+  }): Promise<any[]> {
+    try {
+      // Build query for escrow transactions - only distributed ones
+      const query: any = {
+        landlordId: new Types.ObjectId(landlordId),
+        status: "distributed" // Only show distributed earnings
+      };
+
+      // Filter by date range (use distributedAt for distributed transactions)
+      if (filters?.startDate || filters?.endDate) {
+        query.distributedAt = {};
+        if (filters.startDate) query.distributedAt.$gte = filters.startDate;
+        if (filters.endDate) query.distributedAt.$lte = filters.endDate;
+      }
+
+      // Aggregate escrow transactions by property
+      const result = await EscrowTransaction.aggregate([
+        { $match: query },
+        {
+          $group: {
+            _id: "$propertyId",
+            // Total amounts (what tenant paid)
+            totalAmount: { $sum: "$totalAmount" },
+            // Landlord amounts (what landlord receives after deductions)
+            totalLandlordAmount: { $sum: "$landlordAmount" },
+            // Khayalami amounts (commissions/fees)
+            totalKhayalamiAmount: { $sum: "$khayalamiAmount" },
+            // Deductions breakdown
+            totalSubscriptionFees: { $sum: "$deductions.subscriptionFee" },
+            totalProcessingFees: { $sum: "$deductions.processingFee" },
+            totalInsurancePremiums: { $sum: "$deductions.insurancePremium" },
+            totalDeductions: { $sum: "$deductions.totalDeductions" },
+            // Transaction counts
+            transactionCount: { $sum: 1 },
+            // All transactions are distributed (filtered in query)
+            distributedCount: { $sum: 1 },
+            // Payment method breakdown
+            onlineAmount: {
+              $sum: { $cond: [{ $eq: ["$paymentMethod", "in_app"] }, "$totalAmount", 0] }
+            },
+            cashAmount: {
+              $sum: { $cond: [{ $eq: ["$paymentMethod", "cash"] }, "$totalAmount", 0] }
+            },
+            onlineLandlordAmount: {
+              $sum: { $cond: [{ $eq: ["$paymentMethod", "in_app"] }, "$landlordAmount", 0] }
+            },
+            cashLandlordAmount: {
+              $sum: { $cond: [{ $eq: ["$paymentMethod", "cash"] }, "$landlordAmount", 0] }
+            },
+            onlineCount: {
+              $sum: { $cond: [{ $eq: ["$paymentMethod", "in_app"] }, 1, 0] }
+            },
+            cashCount: {
+              $sum: { $cond: [{ $eq: ["$paymentMethod", "cash"] }, 1, 0] }
+            }
+          }
+        },
+        { $sort: { totalLandlordAmount: -1 } }
+      ]);
+
+      // Get property details and enrich the data
+      const earningsByProperty = await Promise.all(
+        result.map(async (item) => {
+          const property = await Property.findById(item._id)
+            .populate("landlordId", "firstName lastName email")
+            .select("title address propertyType rentAmount bedrooms bathrooms");
+
+          // Get active rental for this property
+          const activeRental = await Rental.findOne({
+            propertyId: item._id,
+            landlordId: new Types.ObjectId(landlordId),
+            status: "active"
+          })
+            .populate("tenantId", "firstName lastName email")
+            .select("monthlyRent startDate endDate status");
+
+          return {
+            propertyId: item._id,
+            property: {
+              title: property?.title || "Unknown Property",
+              address: property?.address || "Unknown Address",
+              propertyType: property?.propertyType || "Unknown",
+              rentAmount: property?.rentAmount || 0,
+              bedrooms: property?.bedrooms,
+              bathrooms: property?.bathrooms
+            },
+            activeRental: activeRental ? {
+              monthlyRent: activeRental.monthlyRent,
+              startDate: activeRental.startDate,
+              endDate: activeRental.endDate,
+              tenant: activeRental.tenantId ? {
+                name: `${(activeRental.tenantId as any).firstName} ${(activeRental.tenantId as any).lastName}`,
+                email: (activeRental.tenantId as any).email
+              } : null
+            } : null,
+            earnings: {
+              // Total amounts (what tenants paid)
+              totalAmount: item.totalAmount || 0,
+              // Net amounts (what landlord receives)
+              totalLandlordAmount: item.totalLandlordAmount || 0,
+              // Deductions
+              totalDeductions: item.totalDeductions || 0,
+              deductionsBreakdown: {
+                subscriptionFees: item.totalSubscriptionFees || 0,
+                processingFees: item.totalProcessingFees || 0,
+                insurancePremiums: item.totalInsurancePremiums || 0
+              },
+              // Khayalami commission/fees
+              totalKhayalamiAmount: item.totalKhayalamiAmount || 0
+            },
+            paymentMethodBreakdown: {
+              online: {
+                totalAmount: item.onlineAmount || 0,
+                landlordAmount: item.onlineLandlordAmount || 0,
+                count: item.onlineCount || 0
+              },
+              cash: {
+                totalAmount: item.cashAmount || 0,
+                landlordAmount: item.cashLandlordAmount || 0,
+                count: item.cashCount || 0
+              }
+            },
+            transactionStats: {
+              total: item.transactionCount || 0,
+              distributed: item.distributedCount || 0
+            }
+          };
+        })
+      );
+
+      return earningsByProperty;
+    } catch (error: any) {
+      throw new Error(`Failed to get earnings by property: ${error.message}`);
+    }
+  }
+
+  /**
+   * Get list of properties that have zero deposit protection package enabled
+   */
+  async getProtectionPackageData(landlordId: string): Promise<any> {
+    try {
+      // Get all properties with zero deposit available
+      const propertiesWithProtection = await Property.find({
+        landlordId: new Types.ObjectId(landlordId),
+        zeroDepositAvailable: true
+      })
+        .select("_id title address propertyType rentAmount deposit status zeroDepositAvailable createdAt")
+        .sort({ createdAt: -1 });
+
+      // Return simple list of properties
+      return propertiesWithProtection.map(prop => ({
+        propertyId: prop._id,
+        title: prop.title,
+        address: prop.address,
+        propertyType: prop.propertyType,
+        rentAmount: prop.rentAmount,
+        deposit: prop.deposit,
+        status: prop.status,
+        zeroDepositAvailable: prop.zeroDepositAvailable,
+        createdAt: prop.createdAt
+      }));
+    } catch (error: any) {
+      throw new Error(`Failed to get protection package data: ${error.message}`);
+    }
   }
 }

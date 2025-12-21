@@ -228,3 +228,4 @@ chat.propertyId.landlordId     // Landlord ID
 - `src/models/Property.ts` - Property model definition
 
 
+

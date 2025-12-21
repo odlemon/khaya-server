@@ -34,4 +34,18 @@ router.get("/balance",
   (req, res, next) => landlordPaymentController.getLandlordBalance(req, res, next)
 );
 
+// Get earnings breakdown by property
+router.get("/earnings/by-property",
+  authenticate,
+  authorize(["landlord"]),
+  (req, res, next) => landlordDashboardController.getEarningsByProperty(req, res, next)
+);
+
+// Get zero deposit protection package data
+router.get("/protection-package",
+  authenticate,
+  authorize(["landlord"]),
+  (req, res, next) => landlordDashboardController.getProtectionPackageData(req, res, next)
+);
+
 export default router;
