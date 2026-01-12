@@ -16,3 +16,5 @@ StandardError=append:/home/YOUR_USERNAME/rental-reminders-service-error.log
 WantedBy=multi-user.target
 
 
+
+

@@ -7,6 +7,8 @@ import { RevenueSource } from "../models/RevenueSource";
 import { PaymentRequest } from "../models/PaymentRequest";
 import { LandlordPreferences } from "../models/LandlordPreferences";
 import { landlordSubscriptionService } from "../services/LandlordSubscriptionService";
+import { favoriteService } from "../services/FavoriteService";
+import { Favorite } from "../models/Favorite";
 import { Types } from "mongoose";
 
 export class PropertyController {
@@ -252,7 +254,26 @@ export class PropertyController {
           });
                  });
 
-                 // Add connection status, boost info, and zero deposit info to each property
+        // ✨ Fetch favorites for authenticated tenant (more efficient query)
+        const favoritesMap = new Map();
+        try {
+          const favorites = await Favorite.find({
+            userId: userId,
+            propertyId: { $in: propertyIds }
+          }).select("propertyId");
+          
+          favorites.forEach((favorite: any) => {
+            const favPropertyId = favorite.propertyId?.toString();
+            if (favPropertyId) {
+              favoritesMap.set(favPropertyId, true);
+            }
+          });
+        } catch (error) {
+          // If error fetching favorites, just continue without them
+          console.error("Error fetching favorites:", error);
+        }
+
+                 // Add connection status, boost info, zero deposit info, and favorite status to each property
         properties = properties.map(property => {
           const propertyObj = property.toObject();
           const propertyIdStr = property._id.toString();
@@ -260,6 +281,7 @@ export class PropertyController {
           const boostInfo = boostMap.get(propertyIdStr);
           const landlordIdStr = property.landlordId?._id?.toString() || property.landlordId?.toString();
           const hasZeroDepositSubscription = zeroDepositMap.get(landlordIdStr) || false;
+          const isFavorited = favoritesMap.get(propertyIdStr) || false;
           
           return {
             ...propertyObj,
@@ -272,11 +294,13 @@ export class PropertyController {
             zeroDepositAvailable: propertyObj.zeroDepositAvailable && hasZeroDepositSubscription,
             zeroDepositSubscriptionActive: hasZeroDepositSubscription,
             // ✨ Explicit verification status for frontend/admin
-            verificationStatus: propertyObj.isVerified ? "verified" : "unverified"
+            verificationStatus: propertyObj.isVerified ? "verified" : "unverified",
+            // ✨ Favorite status
+            isFavorited: isFavorited
           };
         });
       } else {
-        // For non-authenticated users or non-tenants, add false connection status, boost info, and zero deposit info
+        // For non-authenticated users or non-tenants, add false connection status, boost info, zero deposit info, and favorite status
         properties = properties.map(property => {
           const propertyObj = property.toObject();
           const propertyIdStr = property._id.toString();
@@ -295,7 +319,9 @@ export class PropertyController {
             zeroDepositAvailable: propertyObj.zeroDepositAvailable && hasZeroDepositSubscription,
             zeroDepositSubscriptionActive: hasZeroDepositSubscription,
             // ✨ Explicit verification status for frontend/admin
-            verificationStatus: propertyObj.isVerified ? "verified" : "unverified"
+            verificationStatus: propertyObj.isVerified ? "verified" : "unverified",
+            // ✨ Favorite status (false for non-authenticated users)
+            isFavorited: false
           };
         });
       }
@@ -425,16 +451,33 @@ export class PropertyController {
            propertyData.isConnected = false;
            propertyData.connectionState = "none";
          }
+
+        // ✨ Check if property is favorited by authenticated tenant
+        let isFavorited = false;
+        try {
+          const favorite = await Favorite.findOne({
+            userId: userId,
+            propertyId: id
+          });
+          isFavorited = !!favorite;
+        } catch (error) {
+          // If error fetching favorite, just continue without it
+          console.error("Error fetching favorite:", error);
+        }
+        propertyData.isFavorited = isFavorited;
              } else {
          // For non-authenticated users or non-tenants
          propertyData.isConnected = false;
          propertyData.connectionState = "none";
+         propertyData.isFavorited = false;
        }
 
       // Add explicit verificationStatus for frontend/admin
       propertyData = {
         ...propertyData,
-        verificationStatus: propertyData.isVerified ? "verified" : "unverified"
+        verificationStatus: propertyData.isVerified ? "verified" : "unverified",
+        // Ensure isFavorited is explicitly included (already set above for tenants/non-tenants)
+        isFavorited: propertyData.isFavorited !== undefined ? propertyData.isFavorited : false
       };
 
       res.status(200).json({ success: true, data: propertyData });
