@@ -33,6 +33,7 @@ router.patch("/:id/images", authenticate, (req, res, next) => propertyController
 
 // Admin routes (must come before /:id routes to avoid conflicts)
 router.post("/admin/:id/verify", authenticate, authorize(["admin"]), (req, res, next) => propertyController.verifyPropertyListing(req, res, next));
+router.post("/admin/:id/reject", authenticate, authorize(["admin"]), (req, res, next) => propertyController.rejectPropertyListing(req, res, next));
 
 // Boost routes (must come before /:id routes to avoid conflicts)
 router.get("/boosts/history", authenticate, (req, res, next) => propertyController.getAllBoostsHistory(req, res, next));

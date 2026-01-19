@@ -127,22 +127,35 @@ export class DocumentVerificationService {
    */
   static async getUserDocumentStatus(userId: string): Promise<any> {
     try {
-      const user = await User.findById(userId).select("documentVerification role firstName lastName email");
+      const user = await User.findById(userId)
+        .select("documentVerification role firstName lastName email")
+        .populate("documentVerification.rejectedBy", "firstName lastName email");
+      
       if (!user) {
         return null;
       }
+
+      const status = user.documentVerification.status;
 
       return {
         userId: user._id,
         name: `${user.firstName} ${user.lastName}`,
         email: user.email,
         role: user.role,
-        status: user.documentVerification.status,
+        status: status,
         documents: user.documentVerification.documents,
         adminFeedback: user.documentVerification.adminFeedback,
         verifiedAt: user.documentVerification.verifiedAt,
         rejectedAt: user.documentVerification.rejectedAt,
-        rejectionReason: user.documentVerification.rejectionReason
+        // ✨ Include rejection details if status is rejected
+        ...(status === "rejected" && {
+          rejectionReason: user.documentVerification.rejectionReason,
+          rejectedBy: user.documentVerification.rejectedBy ? {
+            _id: (user.documentVerification.rejectedBy as any)._id,
+            name: `${(user.documentVerification.rejectedBy as any).firstName} ${(user.documentVerification.rejectedBy as any).lastName}`,
+            email: (user.documentVerification.rejectedBy as any).email
+          } : null
+        })
       };
     } catch (error) {
       console.error("❌ Error getting user document status:", error);

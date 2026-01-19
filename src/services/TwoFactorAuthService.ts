@@ -1,14 +1,8 @@
 // @ts-nocheck
-import { SendMailClient } from "zeptomail";
 import { TwoFactorAuth, ITwoFactorAuth } from "../models/TwoFactorAuth";
 import { User } from "../models/User";
 import { Types } from "mongoose";
-
-// ZeptoMail configuration
-const zeptoUrl = "api.zeptomail.com/";
-const zeptoToken = "Zoho-enczapikey wSsVR61/+xejCqZ6mzOpJuptkQxSVlmgER993FKmuHb7HKiT8MdvxELKDFWmTfJMFmZvRTRAorookUoIgGZa3dUszgsFASiF9mqRe1U4J3x17qnvhDzPX29dmxCAL4wPwQ1jmWVjFc8q+g==";
-
-const zeptoClient = new SendMailClient({ url: zeptoUrl, token: zeptoToken });
+import { emailTransport, getFromAddress } from "../config/emailConfig";
 
 export class TwoFactorAuthService {
   /**
@@ -126,22 +120,13 @@ export class TwoFactorAuthService {
   private static async send2FAEmailToUser(email: string, firstName: string, pin: string): Promise<void> {
     const subject = "Your 2FA Verification Code - Khayalami";
     const htmlContent = this.get2FAEmailTemplate(firstName, pin);
+    const from = getFromAddress("security");
 
-    await zeptoClient.sendMail({
-      from: {
-        address: "noreply@lysp.io",
-        name: "Khayalami Security"
-      },
-      to: [
-        {
-          email_address: {
-            address: email,
-            name: firstName
-          }
-        }
-      ],
+    await emailTransport.sendMail({
+      from: `${from.name} <${from.address}>`,
+      to: `${firstName} <${email}>`,
       subject: subject,
-      htmlbody: htmlContent
+      html: htmlContent
     });
   }
 

@@ -1,11 +1,6 @@
 // @ts-nocheck
-import { SendMailClient } from "zeptomail";
 import { User } from "../models/User";
-
-// Use existing ZeptoMail configuration
-const zeptoUrl = "api.zeptomail.com/";
-const zeptoToken = "Zoho-enczapikey wSsVR61/+xejCqZ6mzOpJuptkQxSVlmgER993FKmuHb7HKiT8MdvxELKDFWmTfJMFmZvRTRAorookUoIgGZa3dUszgsFASiF9mqRe1U4J3x17qnvhDzPX29dmxCAL4wPwQ1jmWVjFc8q+g==";
-const zeptoClient = new SendMailClient({ url: zeptoUrl, token: zeptoToken });
+import { emailTransport, getFromAddress } from "../config/emailConfig";
 
 export class EmailNotificationService {
   /**
@@ -25,20 +20,13 @@ export class EmailNotificationService {
   }): Promise<void> {
     const subject = "Payment Confirmed - Khayalami";
     const htmlContent = this.getPaymentConfirmedTemplate(data);
+    const from = getFromAddress("notifications");
 
-    await zeptoClient.sendMail({
-      from: {
-        address: "noreply@lysp.io",
-        name: "Khayalami"
-      },
-      to: [{
-        email_address: {
-          address: data.tenantEmail,
-          name: data.tenantName
-        }
-      }],
+    await emailTransport.sendMail({
+      from: `${from.name} <${from.address}>`,
+      to: `${data.tenantName} <${data.tenantEmail}>`,
       subject,
-      htmlbody: htmlContent
+      html: htmlContent
     });
   }
 
@@ -53,20 +41,13 @@ export class EmailNotificationService {
   }): Promise<void> {
     const subject = "Payment Request Submitted - Awaiting Review";
     const htmlContent = this.getPaymentRequestSubmittedTemplate(data);
+    const from = getFromAddress("notifications");
 
-    await zeptoClient.sendMail({
-      from: {
-        address: "noreply@lysp.io",
-        name: "Khayalami"
-      },
-      to: [{
-        email_address: {
-          address: data.tenantEmail,
-          name: data.tenantName
-        }
-      }],
+    await emailTransport.sendMail({
+      from: `${from.name} <${from.address}>`,
+      to: `${data.tenantName} <${data.tenantEmail}>`,
       subject,
-      htmlbody: htmlContent
+      html: htmlContent
     });
   }
 
@@ -86,20 +67,13 @@ export class EmailNotificationService {
   }): Promise<void> {
     const subject = "Payment Approved - Processed Successfully";
     const htmlContent = this.getPaymentApprovedTemplate(data);
+    const from = getFromAddress("notifications");
 
-    await zeptoClient.sendMail({
-      from: {
-        address: "noreply@lysp.io",
-        name: "Khayalami"
-      },
-      to: [{
-        email_address: {
-          address: data.tenantEmail,
-          name: data.tenantName
-        }
-      }],
+    await emailTransport.sendMail({
+      from: `${from.name} <${from.address}>`,
+      to: `${data.tenantName} <${data.tenantEmail}>`,
       subject,
-      htmlbody: htmlContent
+      html: htmlContent
     });
   }
 
@@ -114,20 +88,13 @@ export class EmailNotificationService {
   }): Promise<void> {
     const subject = "Payment Request Rejected";
     const htmlContent = this.getPaymentRejectedTemplate(data);
+    const from = getFromAddress("notifications");
 
-    await zeptoClient.sendMail({
-      from: {
-        address: "noreply@lysp.io",
-        name: "Khayalami"
-      },
-      to: [{
-        email_address: {
-          address: data.tenantEmail,
-          name: data.tenantName
-        }
-      }],
+    await emailTransport.sendMail({
+      from: `${from.name} <${from.address}>`,
+      to: `${data.tenantName} <${data.tenantEmail}>`,
       subject,
-      htmlbody: htmlContent
+      html: htmlContent
     });
   }
 
@@ -144,20 +111,13 @@ export class EmailNotificationService {
   }): Promise<void> {
     const subject = "Rent Payment Distributed - Khayalami";
     const htmlContent = this.getDistributionPayoutTemplate(data);
+    const from = getFromAddress("notifications");
 
-    await zeptoClient.sendMail({
-      from: {
-        address: "noreply@lysp.io",
-        name: "Khayalami"
-      },
-      to: [{
-        email_address: {
-          address: data.landlordEmail,
-          name: data.landlordName
-        }
-      }],
+    await emailTransport.sendMail({
+      from: `${from.name} <${from.address}>`,
+      to: `${data.landlordName} <${data.landlordEmail}>`,
       subject,
-      htmlbody: htmlContent
+      html: htmlContent
     });
   }
 
@@ -174,20 +134,13 @@ export class EmailNotificationService {
   }): Promise<void> {
     const subject = "Rent Deposited in Escrow - Khayalami";
     const htmlContent = this.getRentDepositedEscrowTemplate(data);
+    const from = getFromAddress("notifications");
 
-    await zeptoClient.sendMail({
-      from: {
-        address: "noreply@lysp.io",
-        name: "Khayalami"
-      },
-      to: [{
-        email_address: {
-          address: data.landlordEmail,
-          name: data.landlordName
-        }
-      }],
+    await emailTransport.sendMail({
+      from: `${from.name} <${from.address}>`,
+      to: `${data.landlordName} <${data.landlordEmail}>`,
       subject,
-      htmlbody: htmlContent
+      html: htmlContent
     });
   }
 
@@ -203,20 +156,13 @@ export class EmailNotificationService {
   }): Promise<void> {
     const subject = "New Payment Request - Review Required";
     const htmlContent = this.getAdminPaymentRequestTemplate(data);
+    const from = getFromAddress("notifications");
 
-    await zeptoClient.sendMail({
-      from: {
-        address: "noreply@lysp.io",
-        name: "Khayalami"
-      },
-      to: [{
-        email_address: {
-          address: data.adminEmail,
-          name: "Admin"
-        }
-      }],
+    await emailTransport.sendMail({
+      from: `${from.name} <${from.address}>`,
+      to: `Admin <${data.adminEmail}>`,
       subject,
-      htmlbody: htmlContent
+      html: htmlContent
     });
   }
 
@@ -467,20 +413,13 @@ export class EmailNotificationService {
   }): Promise<void> {
     const subject = "New Rental Agreement Created - Khayalami";
     const htmlContent = this.getAgreementCreatedTemplate(data);
+    const from = getFromAddress("notifications");
 
-    await zeptoClient.sendMail({
-      from: {
-        address: "noreply@lysp.io",
-        name: "Khayalami"
-      },
-      to: [{
-        email_address: {
-          address: data.recipientEmail,
-          name: data.recipientName
-        }
-      }],
+    await emailTransport.sendMail({
+      from: `${from.name} <${from.address}>`,
+      to: `${data.recipientName} <${data.recipientEmail}>`,
       subject,
-      htmlbody: htmlContent
+      html: htmlContent
     });
   }
 
@@ -659,20 +598,13 @@ export class EmailNotificationService {
   }): Promise<void> {
     const subject = this.getRentReminderSubject(data.daysUntilDue, data.reminderType);
     const htmlContent = this.getRentReminderTemplate(data);
+    const from = getFromAddress("notifications");
 
-    await zeptoClient.sendMail({
-      from: {
-        address: "noreply@lysp.io",
-        name: "Khayalami"
-      },
-      to: [{
-        email_address: {
-          address: data.tenantEmail,
-          name: data.tenantName
-        }
-      }],
+    await emailTransport.sendMail({
+      from: `${from.name} <${from.address}>`,
+      to: `${data.tenantName} <${data.tenantEmail}>`,
       subject,
-      htmlbody: htmlContent
+      html: htmlContent
     });
   }
 

@@ -83,13 +83,31 @@ export class AuthController {
             message: "Check your email for verification PIN"
           },
         });
-      } catch (emailError) {
-        // If email fails, delete the user and return error
-        await User.findByIdAndDelete(user._id);
+      } catch (emailError: any) {
+        // ✨ If email fails, keep the user but log the error
+        // User can resend verification email later via /api/email-verification/resend
         console.error("Email verification failed:", emailError);
-        return res.status(500).json({
-          success: false,
-          message: "Registration failed. Unable to send verification email. Please try again."
+        
+        // Check if it's a resource limit error
+        const isResourceLimitError = emailError?.code === 'TM_5001' || 
+                                     emailError?.message?.includes('Resource Limit Exhausted');
+        
+        return res.status(201).json({
+          success: true,
+          message: `Registration successful! However, we couldn't send the verification email at this time. Please use the resend verification email feature to receive your PIN.`,
+          data: {
+            userId: user._id,
+            email: user.email,
+            firstName: user.firstName,
+            lastName: user.lastName,
+            role: user.role,
+            phone: user.phone,
+            isVerified: user.isVerified,
+            requiresEmailVerification: true,
+            emailSent: false,
+            emailError: isResourceLimitError ? "Email service temporarily unavailable. Please resend verification email." : "Unable to send verification email. Please resend.",
+            message: "Please resend verification email to activate your account"
+          },
         });
       }
     } catch (error: any) {

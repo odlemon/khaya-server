@@ -145,28 +145,60 @@ export class DocumentVerificationController {
   }
 
   /**
-   * Verify user documents (Admin)
+   * Verify user documents (Admin) - Approve
    */
   async verifyDocuments(req: Request, res: Response, next: NextFunction) {
     try {
       const adminId = (req as any).user._id;
-      const { userId, status, adminFeedback, rejectionReason } = req.body;
+      const { userId, adminFeedback } = req.body;
 
-      if (!userId || !status) {
+      if (!userId) {
         return res.status(400).json({
           success: false,
-          message: "User ID and status are required"
+          message: "User ID is required"
         });
       }
 
-      if (!["verified", "rejected"].includes(status)) {
+      const result = await DocumentVerificationService.verifyDocuments({
+        userId,
+        status: "verified",
+        adminFeedback,
+        rejectionReason: undefined,
+        verifiedBy: adminId
+      });
+
+      if (result.success) {
+        res.status(200).json({
+          success: true,
+          message: result.message
+        });
+      } else {
+        res.status(400).json({
+          success: false,
+          message: result.message
+        });
+      }
+    } catch (error: any) {
+      next(error);
+    }
+  }
+
+  /**
+   * Reject user documents (Admin)
+   */
+  async rejectDocuments(req: Request, res: Response, next: NextFunction) {
+    try {
+      const adminId = (req as any).user._id;
+      const { userId, rejectionReason, adminFeedback } = req.body;
+
+      if (!userId) {
         return res.status(400).json({
           success: false,
-          message: "Status must be 'verified' or 'rejected'"
+          message: "User ID is required"
         });
       }
 
-      if (status === "rejected" && !rejectionReason) {
+      if (!rejectionReason) {
         return res.status(400).json({
           success: false,
           message: "Rejection reason is required when rejecting documents"
@@ -175,7 +207,7 @@ export class DocumentVerificationController {
 
       const result = await DocumentVerificationService.verifyDocuments({
         userId,
-        status,
+        status: "rejected",
         adminFeedback,
         rejectionReason,
         verifiedBy: adminId
