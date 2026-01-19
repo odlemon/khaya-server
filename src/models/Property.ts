@@ -81,6 +81,14 @@ export interface IProperty extends Document {
   isVerified: boolean;
   isFeatured: boolean;
   
+  // Verification tracking
+  verificationRejectionReason?: string;
+  verifiedBy?: mongoose.Types.ObjectId;
+  rejectedBy?: mongoose.Types.ObjectId;
+  verifiedAt?: Date;
+  rejectedAt?: Date;
+  adminFeedback?: string;
+  
   // Timestamps
   availableFrom: Date;
   createdAt: Date;
@@ -186,6 +194,14 @@ const propertySchema = new Schema<IProperty>(
     },
     isVerified: { type: Boolean, default: false },
     isFeatured: { type: Boolean, default: false },
+    
+    // Verification tracking
+    verificationRejectionReason: { type: String },
+    verifiedBy: { type: Schema.Types.ObjectId, ref: "User" },
+    rejectedBy: { type: Schema.Types.ObjectId, ref: "User" },
+    verifiedAt: { type: Date },
+    rejectedAt: { type: Date },
+    adminFeedback: { type: String },
     
     // Timestamps
     availableFrom: { type: Date, required: true }

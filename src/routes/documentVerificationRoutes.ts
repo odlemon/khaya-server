@@ -18,5 +18,6 @@ router.get("/check", authorize(["tenant", "landlord"]), documentVerificationCont
 router.get("/admin/pending", authorize(["admin"]), documentVerificationController.getPendingVerifications.bind(documentVerificationController));
 router.get("/admin/all", authorize(["admin"]), documentVerificationController.getAllVerifications.bind(documentVerificationController));
 router.post("/admin/verify", authorize(["admin"]), documentVerificationController.verifyDocuments.bind(documentVerificationController));
+router.post("/admin/reject", authorize(["admin"]), documentVerificationController.rejectDocuments.bind(documentVerificationController));
 
 export default router;

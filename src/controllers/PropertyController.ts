@@ -434,7 +434,20 @@ export class PropertyController {
         return res.status(404).json({ success: false, message: "Property not found" });
       }
 
-      let propertyData = property.toObject();
+      // Populate verification tracking fields
+      const propertyWithVerification = await Property.findById(id)
+        .populate("verifiedBy", "firstName lastName email")
+        .populate("rejectedBy", "firstName lastName email")
+        .populate("landlordId", "firstName lastName email phone profile");
+
+      if (!propertyWithVerification) {
+        return res.status(404).json({ success: false, message: "Property not found" });
+      }
+
+      let propertyData = propertyWithVerification.toObject();
+
+      // Check if current user is the landlord
+      const isLandlord = userId && propertyWithVerification.landlordId.toString() === userId.toString();
 
       // Add connection status if user is authenticated as a tenant
       if (userId && userRole === "tenant") {
@@ -472,12 +485,40 @@ export class PropertyController {
          propertyData.isFavorited = false;
        }
 
-      // Add explicit verificationStatus for frontend/admin
+      // Determine verification status
+      let verificationStatus = "pending";
+      if (propertyWithVerification.isVerified && propertyWithVerification.verifiedAt) {
+        verificationStatus = "verified";
+      } else if (propertyWithVerification.rejectedAt && propertyWithVerification.verificationRejectionReason) {
+        verificationStatus = "rejected";
+      }
+
+      // Add explicit verificationStatus and details (include rejection reason for landlord)
       propertyData = {
         ...propertyData,
-        verificationStatus: propertyData.isVerified ? "verified" : "unverified",
+        verificationStatus,
         // Ensure isFavorited is explicitly included (already set above for tenants/non-tenants)
-        isFavorited: propertyData.isFavorited !== undefined ? propertyData.isFavorited : false
+        isFavorited: propertyData.isFavorited !== undefined ? propertyData.isFavorited : false,
+        // Include verification details if user is the landlord or admin
+        ...(isLandlord || userRole === "admin" ? {
+          verificationDetails: {
+            isVerified: propertyWithVerification.isVerified,
+            verifiedBy: propertyWithVerification.verifiedBy ? {
+              _id: (propertyWithVerification.verifiedBy as any)._id,
+              name: `${(propertyWithVerification.verifiedBy as any).firstName} ${(propertyWithVerification.verifiedBy as any).lastName}`,
+              email: (propertyWithVerification.verifiedBy as any).email
+            } : null,
+            verifiedAt: propertyWithVerification.verifiedAt || null,
+            rejectedBy: propertyWithVerification.rejectedBy ? {
+              _id: (propertyWithVerification.rejectedBy as any)._id,
+              name: `${(propertyWithVerification.rejectedBy as any).firstName} ${(propertyWithVerification.rejectedBy as any).lastName}`,
+              email: (propertyWithVerification.rejectedBy as any).email
+            } : null,
+            rejectedAt: propertyWithVerification.rejectedAt || null,
+            rejectionReason: propertyWithVerification.verificationRejectionReason || null,
+            adminFeedback: propertyWithVerification.adminFeedback || null
+          }
+        } : {})
       };
 
       res.status(200).json({ success: true, data: propertyData });
@@ -513,6 +554,22 @@ export class PropertyController {
           success: false, 
           message: "You can only update your own properties" 
         });
+      }
+
+      // ✨ If propertyProofDocuments are being updated, reset verification status
+      // This ensures new documents need to be reviewed by admin
+      if (updateData.propertyProofDocuments !== undefined) {
+        // Reset verification fields when documents are updated
+        updateData.isVerified = false;
+        updateData.verifiedBy = undefined;
+        updateData.verifiedAt = undefined;
+        updateData.rejectedBy = undefined;
+        updateData.rejectedAt = undefined;
+        updateData.verificationRejectionReason = undefined;
+        // Keep adminFeedback if it exists, or clear it
+        if (!updateData.propertyProofDocuments || updateData.propertyProofDocuments.length === 0) {
+          updateData.adminFeedback = undefined;
+        }
       }
 
       const updatedProperty = await Property.findByIdAndUpdate(
@@ -582,11 +639,48 @@ export class PropertyController {
       }
 
       const properties = await Property.find(query)
+        .populate("verifiedBy", "firstName lastName email")
+        .populate("rejectedBy", "firstName lastName email")
         .sort({ createdAt: -1 });
+
+      // Add verification status and details to each property
+      const propertiesWithVerification = properties.map(property => {
+        const propertyObj = property.toObject();
+        
+        // Determine verification status
+        let verificationStatus = "pending";
+        if (property.isVerified && property.verifiedAt) {
+          verificationStatus = "verified";
+        } else if (property.rejectedAt && property.verificationRejectionReason) {
+          verificationStatus = "rejected";
+        }
+
+        return {
+          ...propertyObj,
+          verificationStatus,
+          verificationDetails: {
+            isVerified: property.isVerified,
+            verifiedBy: property.verifiedBy ? {
+              _id: (property.verifiedBy as any)._id,
+              name: `${(property.verifiedBy as any).firstName} ${(property.verifiedBy as any).lastName}`,
+              email: (property.verifiedBy as any).email
+            } : null,
+            verifiedAt: property.verifiedAt || null,
+            rejectedBy: property.rejectedBy ? {
+              _id: (property.rejectedBy as any)._id,
+              name: `${(property.rejectedBy as any).firstName} ${(property.rejectedBy as any).lastName}`,
+              email: (property.rejectedBy as any).email
+            } : null,
+            rejectedAt: property.rejectedAt || null,
+            rejectionReason: property.verificationRejectionReason || null,
+            adminFeedback: property.adminFeedback || null
+          }
+        };
+      });
 
       res.status(200).json({ 
         success: true, 
-        data: properties 
+        data: propertiesWithVerification 
       });
     } catch (error: any) {
       next(error);
@@ -1219,6 +1313,7 @@ export class PropertyController {
   async verifyPropertyListing(req: Request, res: Response, next: NextFunction) {
     try {
       const { id } = req.params;
+      const adminId = (req as any).user._id;
 
       if (!Types.ObjectId.isValid(id)) {
         return res.status(400).json({ success: false, message: "Invalid property ID" });
@@ -1239,6 +1334,14 @@ export class PropertyController {
 
       // Verify the property
       property.isVerified = true;
+      property.verifiedBy = new Types.ObjectId(adminId);
+      property.verifiedAt = new Date();
+      property.rejectedBy = undefined;
+      property.rejectedAt = undefined;
+      property.verificationRejectionReason = undefined;
+      if (req.body.adminFeedback) {
+        property.adminFeedback = req.body.adminFeedback;
+      }
       await property.save();
 
       const propertyData = property.toObject();
@@ -1247,6 +1350,57 @@ export class PropertyController {
       return res.status(200).json({
         success: true,
         message: "Property listing verified successfully",
+        data: propertyData
+      });
+    } catch (error: any) {
+      next(error);
+    }
+  }
+
+  /**
+   * Admin: Reject a property listing
+   * POST /api/properties/admin/:id/reject
+   */
+  async rejectPropertyListing(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { id } = req.params;
+      const adminId = (req as any).user._id;
+      const { rejectionReason, adminFeedback } = req.body;
+
+      if (!Types.ObjectId.isValid(id)) {
+        return res.status(400).json({ success: false, message: "Invalid property ID" });
+      }
+
+      if (!rejectionReason) {
+        return res.status(400).json({
+          success: false,
+          message: "Rejection reason is required when rejecting a property listing"
+        });
+      }
+
+      const property = await Property.findById(id);
+      if (!property) {
+        return res.status(404).json({ success: false, message: "Property not found" });
+      }
+
+      // Reject the property
+      property.isVerified = false;
+      property.rejectedBy = new Types.ObjectId(adminId);
+      property.rejectedAt = new Date();
+      property.verificationRejectionReason = rejectionReason;
+      property.verifiedBy = undefined;
+      property.verifiedAt = undefined;
+      if (adminFeedback) {
+        property.adminFeedback = adminFeedback;
+      }
+      await property.save();
+
+      const propertyData = property.toObject();
+      propertyData.verificationStatus = "rejected";
+
+      return res.status(200).json({
+        success: true,
+        message: "Property listing rejected successfully",
         data: propertyData
       });
     } catch (error: any) {

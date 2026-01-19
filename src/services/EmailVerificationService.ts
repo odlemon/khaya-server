@@ -1,14 +1,8 @@
 // @ts-nocheck
-import { SendMailClient } from "zeptomail";
 import { EmailVerification, IEmailVerification } from "../models/EmailVerification";
 import { User } from "../models/User";
 import { Types } from "mongoose";
-
-// ZeptoMail configuration
-const zeptoUrl = "api.zeptomail.com/";
-const zeptoToken = "Zoho-enczapikey wSsVR61/+xejCqZ6mzOpJuptkQxSVlmgER993FKmuHb7HKiT8MdvxELKDFWmTfJMFmZvRTRAorookUoIgGZa3dUszgsFASiF9mqRe1U4J3x17qnvhDzPX29dmxCAL4wPwQ1jmWVjFc8q+g==";
-
-const zeptoClient = new SendMailClient({ url: zeptoUrl, token: zeptoToken });
+import { emailTransport, getFromAddress } from "../config/emailConfig";
 
 export interface EmailVerificationData {
   email: string;
@@ -203,22 +197,13 @@ export class EmailVerificationService {
   private static async sendVerificationEmailToUser(data: EmailVerificationData, pin: string): Promise<void> {
     const subject = "Verify Your Email - Khayalami";
     const htmlContent = this.getVerificationEmailTemplate(data, pin);
+    const from = getFromAddress("verification");
 
-    await zeptoClient.sendMail({
-      from: {
-        address: "noreply@lysp.io",
-        name: "Khayalami"
-      },
-      to: [
-        {
-          email_address: {
-            address: data.email,
-            name: `${data.firstName} ${data.lastName}`
-          }
-        }
-      ],
+    await emailTransport.sendMail({
+      from: `${from.name} <${from.address}>`,
+      to: `${data.firstName} ${data.lastName} <${data.email}>`,
       subject: subject,
-      htmlbody: htmlContent
+      html: htmlContent
     });
   }
 
@@ -228,22 +213,13 @@ export class EmailVerificationService {
   private static async sendWelcomeEmail(data: EmailVerificationData): Promise<void> {
     const subject = "Welcome to Khayalami!";
     const htmlContent = this.getWelcomeEmailTemplate(data);
+    const from = getFromAddress("verification");
 
-    await zeptoClient.sendMail({
-      from: {
-        address: "noreply@lysp.io",
-        name: "Khayalami"
-      },
-      to: [
-        {
-          email_address: {
-            address: data.email,
-            name: `${data.firstName} ${data.lastName}`
-          }
-        }
-      ],
+    await emailTransport.sendMail({
+      from: `${from.name} <${from.address}>`,
+      to: `${data.firstName} ${data.lastName} <${data.email}>`,
       subject: subject,
-      htmlbody: htmlContent
+      html: htmlContent
     });
   }
 
