@@ -1339,9 +1339,8 @@ export class PropertyController {
       property.rejectedBy = undefined;
       property.rejectedAt = undefined;
       property.verificationRejectionReason = undefined;
-      if (req.body.adminFeedback) {
-        property.adminFeedback = req.body.adminFeedback;
-      }
+      // adminFeedback is optional - only set if provided
+      property.adminFeedback = (req.body?.adminFeedback) || undefined;
       await property.save();
 
       const propertyData = property.toObject();
