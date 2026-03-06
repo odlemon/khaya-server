@@ -7,6 +7,14 @@ export interface IConnection extends Document {
   propertyId: mongoose.Types.ObjectId;
   status: "pending" | "accepted" | "rejected";
   message: string;
+  expectedMoveInDate?: Date;
+  expectedBudget?: number;
+  numberOfOccupants?: number;
+  employmentStatus?: "employed" | "self-employed" | "student" | "unemployed" | "retired" | "other";
+  leaseDurationMonths?: number;
+  hasPets?: boolean;
+  petDetails?: string;
+  specialRequirements?: string;
   responseMessage?: string;
   respondedAt?: Date;
   respondedBy?: mongoose.Types.ObjectId;
@@ -40,6 +48,36 @@ const connectionSchema = new Schema<IConnection>({
     type: String, 
     required: true, 
     maxlength: 500 
+  },
+  expectedMoveInDate: {
+    type: Date
+  },
+  expectedBudget: {
+    type: Number,
+    min: 0
+  },
+  numberOfOccupants: {
+    type: Number,
+    min: 1
+  },
+  employmentStatus: {
+    type: String,
+    enum: ["employed", "self-employed", "student", "unemployed", "retired", "other"]
+  },
+  leaseDurationMonths: {
+    type: Number,
+    min: 1
+  },
+  hasPets: {
+    type: Boolean
+  },
+  petDetails: {
+    type: String,
+    maxlength: 300
+  },
+  specialRequirements: {
+    type: String,
+    maxlength: 500
   },
   responseMessage: { 
     type: String, 

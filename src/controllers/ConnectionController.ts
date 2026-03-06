@@ -15,7 +15,19 @@ export class ConnectionController {
     try {
       const userId = (req as any).user._id;
       const userRole = (req as any).user.role;
-      const { propertyId, landlordId, message } = req.body;
+      const { 
+        propertyId, 
+        landlordId, 
+        message,
+        expectedMoveInDate,
+        expectedBudget,
+        numberOfOccupants,
+        employmentStatus,
+        leaseDurationMonths,
+        hasPets,
+        petDetails,
+        specialRequirements
+      } = req.body;
 
       // Only tenants can send connection requests
       if (userRole !== "tenant") {
@@ -76,6 +88,16 @@ export class ConnectionController {
         isActive: false
       });
 
+      const tenantDetails: any = {};
+      if (expectedMoveInDate) tenantDetails.expectedMoveInDate = new Date(expectedMoveInDate);
+      if (expectedBudget !== undefined) tenantDetails.expectedBudget = Number(expectedBudget);
+      if (numberOfOccupants !== undefined) tenantDetails.numberOfOccupants = Number(numberOfOccupants);
+      if (employmentStatus) tenantDetails.employmentStatus = employmentStatus;
+      if (leaseDurationMonths !== undefined) tenantDetails.leaseDurationMonths = Number(leaseDurationMonths);
+      if (hasPets !== undefined) tenantDetails.hasPets = Boolean(hasPets);
+      if (petDetails) tenantDetails.petDetails = petDetails.trim();
+      if (specialRequirements) tenantDetails.specialRequirements = specialRequirements.trim();
+
       let connection;
       if (inactiveConnection) {
         // Reactivate the existing connection
@@ -85,18 +107,19 @@ export class ConnectionController {
         inactiveConnection.createdAt = new Date();
         inactiveConnection.respondedAt = null;
         inactiveConnection.responseMessage = null;
+        Object.assign(inactiveConnection, tenantDetails);
         await inactiveConnection.save();
         connection = inactiveConnection;
       } else {
-        // Create new connection request
         connection = new Connection({
-        tenantId: userId,
-        landlordId,
-        propertyId,
-        message: message.trim(),
-        status: "pending"
-      });
-      await connection.save();
+          tenantId: userId,
+          landlordId,
+          propertyId,
+          message: message.trim(),
+          status: "pending",
+          ...tenantDetails
+        });
+        await connection.save();
       }
 
       // Populate user and property details for response
@@ -458,54 +481,29 @@ export class ConnectionController {
    */
   async getLandlordConnections(req: Request, res: Response, next: NextFunction) {
     try {
-      console.log("🔍 DEBUG: getLandlordConnections called");
-      
       const userId = (req as any).user._id;
       const { status, propertyId } = req.query;
 
-      console.log("🔍 DEBUG: userId:", userId);
-      console.log("🔍 DEBUG: status filter:", status);
-      console.log("🔍 DEBUG: propertyId filter:", propertyId);
-
       const query: any = { landlordId: new Types.ObjectId(userId) };
 
-      // Filter by status if provided
       if (status) {
         query.status = status;
       }
 
-      // Filter by property if provided
       if (propertyId) {
         query.propertyId = propertyId;
       }
 
-      console.log("🔍 DEBUG: Final query:", JSON.stringify(query, null, 2));
-
-      // Debug: Check all connections in database
-      const allConnections = await Connection.find({});
-      console.log("🔍 DEBUG: All connections in database:", allConnections.length);
-      console.log("🔍 DEBUG: All connections:", JSON.stringify(allConnections.map(c => ({
-        id: c._id,
-        landlordId: c.landlordId,
-        tenantId: c.tenantId,
-        propertyId: c.propertyId,
-        status: c.status
-      })), null, 2));
-
       const connections = await Connection.find(query)
         .populate("tenantId", "firstName lastName email phone")
-        .populate("propertyId", "title address")
+        .populate("propertyId", "title address images")
         .sort({ createdAt: -1 });
-
-      console.log("🔍 DEBUG: Found connections:", connections.length);
-      console.log("🔍 DEBUG: Connections:", JSON.stringify(connections, null, 2));
 
       res.status(200).json({
         success: true,
         data: connections
       });
     } catch (error: any) {
-      console.log("❌ ERROR in getLandlordConnections:", error.message);
       next(error);
     }
   }
