@@ -4,6 +4,9 @@ import { paymentService } from "../services/PaymentService";
 import { paymentRequestService } from "../services/PaymentRequestService";
 import { CommissionService } from "../services/CommissionService";
 import { transactionService } from "../services/TransactionService";
+import { paynowService } from "../services/PaynowService";
+import { Payment } from "../models/Payment";
+import { Rental } from "../models/Rental";
 import { Types } from "mongoose";
 
 const commissionService = new CommissionService();
@@ -69,11 +72,88 @@ export class PaymentController {
         });
       }
 
-      // Online payment (in_app) - process immediately
+      // Paynow mobile money payment
+      if (paymentData.paymentMethod === "paynow" || paymentData.phone) {
+        const phone = paymentData.phone;
+        const method = paymentData.mobileMethod || "ecocash";
+
+        if (!phone) {
+          return res.status(400).json({ success: false, message: "Phone number is required for Paynow payments" });
+        }
+
+        const rental = await Rental.findById(rentalId);
+        if (!rental) {
+          return res.status(404).json({ success: false, message: "Rental not found" });
+        }
+
+        const reference = paynowService.generateReference("RENT", userId);
+
+        // Find pending invoice
+        const { Invoice } = await import("../models/Invoice");
+        const pendingInvoice = await Invoice.findOne({
+          rentalId: rental._id,
+          tenantId: new Types.ObjectId(userId),
+          status: { $in: ["pending", "partially_paid", "overdue"] }
+        }).sort({ dueDate: 1 });
+
+        // Create pending payment record
+        const pendingPayment = await Payment.create({
+          rentalId: rental._id,
+          agreementId: rental.agreementId,
+          propertyId: rental.propertyId,
+          invoiceId: pendingInvoice?._id || null,
+          landlordId: rental.landlordId,
+          tenantId: rental.tenantId,
+          paymentType: paymentData.paymentType || "rent",
+          amount: paymentData.amount,
+          totalAmount: paymentData.amount,
+          dueDate: new Date(),
+          paymentMethod: "in_app",
+          status: "pending",
+          notes: paymentData.notes,
+          pollUrl: null,
+          paynowReference: reference,
+          paynowMetadata: { paymentPurpose: "rent" }
+        });
+
+        // Initiate Paynow payment
+        const paynowResult = await paynowService.initiateMobilePayment({
+          reference,
+          description: `Rent payment for ${rental.propertyId}`,
+          amount: paymentData.amount,
+          phone,
+          method,
+          email: paymentData.email
+        });
+
+        if (!paynowResult.success) {
+          pendingPayment.status = "cancelled";
+          pendingPayment.rejectionReason = paynowResult.error;
+          await pendingPayment.save();
+          return res.status(400).json({ success: false, message: paynowResult.error || "Payment initiation failed" });
+        }
+
+        pendingPayment.pollUrl = paynowResult.pollUrl;
+        await pendingPayment.save();
+
+        return res.status(201).json({
+          success: true,
+          message: "Payment initiated. Check your phone for payment instructions.",
+          data: {
+            paymentId: pendingPayment._id,
+            reference,
+            pollUrl: paynowResult.pollUrl,
+            instructions: paynowResult.instructions,
+            statusCheckUrl: `/api/webhooks/payment-status/${pendingPayment._id}`
+          }
+        });
+      }
+
+      // Legacy online payment (in_app with gatewayResponse) - process immediately
       if (!paymentData.gatewayResponse) {
         return res.status(400).json({
           success: false,
-          message: "Gateway response is required for online payments"
+          message: "Gateway response or phone number is required for online payments"
         });
       }
 
@@ -82,11 +162,9 @@ export class PaymentController {
         paymentMethod: "in_app"
       });
 
-      // Fetch escrow transaction
       const { EscrowTransaction } = await import("../models/Escrow");
       const escrowTransaction = await EscrowTransaction.findOne({ paymentId: payment._id });
 
-      // Fetch revenue sources
       const { RevenueSource } = await import("../models/RevenueSource");
       const revenueSources = await RevenueSource.find({ paymentId: payment._id });
 

@@ -1,9 +1,12 @@
 // @ts-nocheck
 import { Request, Response } from "express";
 import { landlordSubscriptionService } from "../services/LandlordSubscriptionService";
+import { paynowService } from "../services/PaynowService";
 import { emailNotificationService } from "../services/EmailNotificationService";
+import { Payment } from "../models/Payment";
 import { User } from "../models/User";
 import { authenticate, authorize } from "../middleware/authenticate";
+import { Types } from "mongoose";
 
 export class LandlordSubscriptionController {
   /**
@@ -31,45 +34,68 @@ export class LandlordSubscriptionController {
         return;
       }
 
-      if (paymentMethod === "in_app" && !gatewayResponse) {
-        res.status(400).json({
-          success: false,
-          message: "Gateway response required for in-app payments"
+      if (paymentMethod === "external") {
+        res.status(400).json({ success: false, message: "Use /api/landlord/subscription/request for external payments" });
+        return;
+      }
+
+      // Paynow mobile money path
+      const { phone, mobileMethod } = req.body;
+      if (phone) {
+        const price = landlordSubscriptionService.calculateSubscriptionPrice(planType);
+        const reference = paynowService.generateReference("LSUB", landlordId);
+
+        const pendingPayment = await Payment.create({
+          rentalId: null, agreementId: null, propertyId: null,
+          landlordId: new Types.ObjectId(landlordId),
+          tenantId: new Types.ObjectId(landlordId),
+          paymentType: "service",
+          amount: price, totalAmount: price,
+          paymentMethod: "in_app", status: "pending",
+          notes: `Landlord premium subscription - ${planType}`,
+          paynowReference: reference,
+          paynowMetadata: { paymentPurpose: "landlord_premium_subscription", planType, autoRenew: autoRenew !== false }
+        });
+
+        const paynowResult = await paynowService.initiateMobilePayment({
+          reference, description: `Landlord ${planType} subscription`,
+          amount: price, phone, method: mobileMethod || "ecocash"
+        });
+
+        if (!paynowResult.success) {
+          pendingPayment.status = "cancelled";
+          pendingPayment.rejectionReason = paynowResult.error;
+          await pendingPayment.save();
+          res.status(400).json({ success: false, message: paynowResult.error || "Payment initiation failed" });
+          return;
+        }
+
+        pendingPayment.pollUrl = paynowResult.pollUrl;
+        await pendingPayment.save();
+
+        res.status(201).json({
+          success: true,
+          message: "Subscription payment initiated. Check your phone.",
+          data: {
+            paymentId: pendingPayment._id, reference,
+            pollUrl: paynowResult.pollUrl, instructions: paynowResult.instructions,
+            statusCheckUrl: `/api/webhooks/payment-status/${pendingPayment._id}`
+          }
         });
         return;
       }
 
-      if (paymentMethod === "external") {
-        res.status(400).json({
-          success: false,
-          message: "Use /api/landlord/subscription/request for external payments"
-        });
+      // Legacy gatewayResponse path
+      if (!gatewayResponse) {
+        res.status(400).json({ success: false, message: "Phone number or gateway response required for payment" });
         return;
       }
 
       const result = await landlordSubscriptionService.subscribe({
-        landlordId,
-        planType,
-        paymentMethod: "in_app",
-        gatewayResponse,
-        autoRenew: autoRenew !== false
+        landlordId, planType, paymentMethod: "in_app", gatewayResponse, autoRenew: autoRenew !== false
       });
 
-      // Send email notification
-      try {
-        const landlord = await User.findById(landlordId);
-        if (landlord) {
-          // TODO: Add subscription confirmation email
-        }
-      } catch (emailError) {
-        console.error("Error sending email:", emailError);
-      }
-
-      res.status(200).json({
-        success: true,
-        message: "Subscription activated successfully",
-        data: result
-      });
+      res.status(200).json({ success: true, message: "Subscription activated successfully", data: result });
     } catch (error: any) {
       console.error("Error subscribing:", error);
       res.status(500).json({
@@ -200,35 +226,68 @@ export class LandlordSubscriptionController {
         return;
       }
 
-      if (paymentMethod === "in_app" && !gatewayResponse) {
-        res.status(400).json({
-          success: false,
-          message: "Gateway response required for in-app payments"
+      if (paymentMethod === "external") {
+        res.status(400).json({ success: false, message: "Use /api/landlord/subscription/zero-deposit-protection/request for external payments" });
+        return;
+      }
+
+      // Paynow mobile money path
+      const { phone, mobileMethod } = req.body;
+      if (phone) {
+        const price = landlordSubscriptionService.calculateZeroDepositProtectionPrice(propertyCount);
+        const reference = paynowService.generateReference("ZDEP", landlordId);
+
+        const pendingPayment = await Payment.create({
+          rentalId: null, agreementId: null, propertyId: null,
+          landlordId: new Types.ObjectId(landlordId),
+          tenantId: new Types.ObjectId(landlordId),
+          paymentType: "service",
+          amount: price, totalAmount: price,
+          paymentMethod: "in_app", status: "pending",
+          notes: `Zero Deposit Protection subscription`,
+          paynowReference: reference,
+          paynowMetadata: { paymentPurpose: "zero_deposit_protection", autoRenew: autoRenew !== false, propertyCount }
+        });
+
+        const paynowResult = await paynowService.initiateMobilePayment({
+          reference, description: "Zero Deposit Protection subscription",
+          amount: price, phone, method: mobileMethod || "ecocash"
+        });
+
+        if (!paynowResult.success) {
+          pendingPayment.status = "cancelled";
+          pendingPayment.rejectionReason = paynowResult.error;
+          await pendingPayment.save();
+          res.status(400).json({ success: false, message: paynowResult.error || "Payment initiation failed" });
+          return;
+        }
+
+        pendingPayment.pollUrl = paynowResult.pollUrl;
+        await pendingPayment.save();
+
+        res.status(201).json({
+          success: true,
+          message: "Zero Deposit Protection payment initiated. Check your phone.",
+          data: {
+            paymentId: pendingPayment._id, reference,
+            pollUrl: paynowResult.pollUrl, instructions: paynowResult.instructions,
+            statusCheckUrl: `/api/webhooks/payment-status/${pendingPayment._id}`
+          }
         });
         return;
       }
 
-      if (paymentMethod === "external") {
-        res.status(400).json({
-          success: false,
-          message: "Use /api/landlord/subscription/zero-deposit-protection/request for external payments"
-        });
+      // Legacy gatewayResponse path
+      if (!gatewayResponse) {
+        res.status(400).json({ success: false, message: "Phone number or gateway response required for payment" });
         return;
       }
 
       const result = await landlordSubscriptionService.subscribeToZeroDepositProtection({
-        landlordId,
-        paymentMethod: "in_app",
-        gatewayResponse,
-        autoRenew: autoRenew !== false,
-        propertyCount
+        landlordId, paymentMethod: "in_app", gatewayResponse, autoRenew: autoRenew !== false, propertyCount
       });
 
-      res.status(200).json({
-        success: true,
-        message: "Zero Deposit Protection subscription activated successfully",
-        data: result
-      });
+      res.status(200).json({ success: true, message: "Zero Deposit Protection subscription activated successfully", data: result });
     } catch (error: any) {
       console.error("Error subscribing to zero deposit protection:", error);
       res.status(500).json({

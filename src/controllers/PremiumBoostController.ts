@@ -1,10 +1,13 @@
 // @ts-nocheck
 import { Request, Response } from "express";
 import { premiumBoostService } from "../services/PremiumBoostService";
+import { paynowService } from "../services/PaynowService";
 import { emailNotificationService } from "../services/EmailNotificationService";
+import { Payment } from "../models/Payment";
 import { User } from "../models/User";
 import { Property } from "../models/Property";
 import { authenticate, authorize } from "../middleware/authenticate";
+import { Types } from "mongoose";
 
 export class PremiumBoostController {
   /**
@@ -34,45 +37,70 @@ export class PremiumBoostController {
         return;
       }
 
-      if (paymentMethod === "in_app" && !gatewayResponse) {
-        res.status(400).json({
-          success: false,
-          message: "Gateway response required for in-app payments"
+      if (paymentMethod === "external") {
+        res.status(400).json({ success: false, message: "Use /api/properties/:propertyId/boost/request for external payments" });
+        return;
+      }
+
+      // Paynow mobile money path
+      const { phone, mobileMethod } = req.body;
+      if (phone) {
+        const priceMap: Record<number, number> = { 7: 5, 30: 15, 90: 35 };
+        const price = priceMap[duration] || 15;
+        const reference = paynowService.generateReference("BOOST", landlordId);
+
+        const pendingPayment = await Payment.create({
+          rentalId: null, agreementId: null,
+          propertyId: new Types.ObjectId(propertyId),
+          landlordId: new Types.ObjectId(landlordId),
+          tenantId: new Types.ObjectId(landlordId),
+          paymentType: "service",
+          amount: price, totalAmount: price,
+          paymentMethod: "in_app", status: "pending",
+          notes: `Premium boost - ${duration} days`,
+          paynowReference: reference,
+          paynowMetadata: { paymentPurpose: "premium_boost", duration, propertyId }
+        });
+
+        const paynowResult = await paynowService.initiateMobilePayment({
+          reference, description: `Premium boost ${duration} days`,
+          amount: price, phone, method: mobileMethod || "ecocash"
+        });
+
+        if (!paynowResult.success) {
+          pendingPayment.status = "cancelled";
+          pendingPayment.rejectionReason = paynowResult.error;
+          await pendingPayment.save();
+          res.status(400).json({ success: false, message: paynowResult.error || "Payment initiation failed" });
+          return;
+        }
+
+        pendingPayment.pollUrl = paynowResult.pollUrl;
+        await pendingPayment.save();
+
+        res.status(201).json({
+          success: true,
+          message: "Boost payment initiated. Check your phone.",
+          data: {
+            paymentId: pendingPayment._id, reference,
+            pollUrl: paynowResult.pollUrl, instructions: paynowResult.instructions,
+            statusCheckUrl: `/api/webhooks/payment-status/${pendingPayment._id}`
+          }
         });
         return;
       }
 
-      if (paymentMethod === "external") {
-        res.status(400).json({
-          success: false,
-          message: "Use /api/properties/:propertyId/boost/request for external payments"
-        });
+      // Legacy gatewayResponse path
+      if (!gatewayResponse) {
+        res.status(400).json({ success: false, message: "Phone number or gateway response required for payment" });
         return;
       }
 
       const result = await premiumBoostService.purchaseBoost({
-        propertyId,
-        landlordId,
-        duration,
-        paymentMethod: "in_app",
-        gatewayResponse
+        propertyId, landlordId, duration, paymentMethod: "in_app", gatewayResponse
       });
 
-      // Send email notification
-      try {
-        const landlord = await User.findById(landlordId);
-        if (landlord) {
-          // TODO: Add boost purchase confirmation email
-        }
-      } catch (emailError) {
-        console.error("Error sending email:", emailError);
-      }
-
-      res.status(200).json({
-        success: true,
-        message: "Premium boost purchased successfully",
-        data: result
-      });
+      res.status(200).json({ success: true, message: "Premium boost purchased successfully", data: result });
     } catch (error: any) {
       console.error("Error purchasing boost:", error);
       res.status(500).json({

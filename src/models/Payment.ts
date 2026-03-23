@@ -28,9 +28,8 @@ export interface IPayment extends Document {
   paymentMethod: "in_app" | "cash";
   proofOfPayment?: string; // Firebase URL (optional for cash)
   
-  // In-app payment gateway (for future integration)
   gatewayResponse?: {
-    provider: "stripe" | "paystack" | "flutterwave" | "other";
+    provider: "paynow" | "stripe" | "paystack" | "flutterwave" | "other";
     transactionId: string;
     transactionRef: string;
     paidAt: Date;
@@ -58,6 +57,14 @@ export interface IPayment extends Document {
   }];
   
   notes?: string;
+  
+  // Paynow gateway fields
+  pollUrl?: string;
+  paynowReference?: string;
+  paynowMetadata?: {
+    paymentPurpose: string;
+    [key: string]: any;
+  };
   
   createdAt: Date;
   updatedAt: Date;
@@ -118,7 +125,7 @@ const paymentSchema = new Schema<IPayment>({
   proofOfPayment: { type: String }, // Optional for cash
   
   gatewayResponse: {
-    provider: { type: String, enum: ["stripe", "paystack", "flutterwave", "other"] },
+    provider: { type: String, enum: ["paynow", "stripe", "paystack", "flutterwave", "other"] },
     transactionId: { type: String },
     transactionRef: { type: String },
     paidAt: { type: Date },
@@ -149,7 +156,12 @@ const paymentSchema = new Schema<IPayment>({
     status: { type: String, enum: ["sent", "failed"], required: true }
   }],
   
-  notes: { type: String }
+  notes: { type: String },
+  
+  // Paynow gateway fields
+  pollUrl: { type: String },
+  paynowReference: { type: String, index: true },
+  paynowMetadata: { type: Schema.Types.Mixed }
 }, { 
   timestamps: true 
 });
