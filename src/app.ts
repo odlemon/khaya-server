@@ -98,6 +98,7 @@ import landlordSubscriptionRoutes from "./routes/landlordSubscriptionRoutes"
 import transactionRoutes from "./routes/transactionRoutes"
 import tenantSubscriptionRoutes from "./routes/tenantSubscriptionRoutes"
 import cronRoutes from "./routes/cronRoutes"
+import webhookRoutes from "./routes/webhookRoutes"
 
 app.use("/api/users", userRoutes)
 app.use("/api/auth", authRoutes)
@@ -134,6 +135,7 @@ app.use("/api/admin/dashboard", adminDashboardRoutes)
 app.use("/api/admin/reports", adminReportRoutes)
 app.use("/api/transactions", transactionRoutes)
 app.use("/api/cron", cronRoutes)
+app.use("/api/webhooks", webhookRoutes)
 app.use(errorMiddleware)
 
 // Initialize Socket.IO service

@@ -1,6 +1,7 @@
 // @ts-nocheck
 import { Request, Response } from "express";
 import { subscriptionService } from "../services/SubscriptionService";
+import { paynowService } from "../services/PaynowService";
 import { PaymentRequest } from "../models/PaymentRequest";
 import { Payment } from "../models/Payment";
 import { Rental } from "../models/Rental";
@@ -21,12 +22,21 @@ export class TenantSubscriptionController {
         return;
       }
 
-      const { planType, propertyValueBracket, gatewayResponse, autoRenew } = req.body;
+      const { planType, propertyValueBracket, phone, mobileMethod, autoRenew } = req.body;
 
       if (!planType || !propertyValueBracket) {
         res.status(400).json({
           success: false,
           message: "Missing required fields: planType, propertyValueBracket"
+        });
+        return;
+      }
+
+      // Online payment goes via Paynow only; phone is required
+      if (!phone || typeof phone !== "string" || !phone.trim()) {
+        res.status(400).json({
+          success: false,
+          message: "Phone number is required for payment. Send 'phone' (e.g. EcoCash/OneMoney number) in the request body."
         });
         return;
       }
@@ -47,83 +57,59 @@ export class TenantSubscriptionController {
         return;
       }
 
-      if (!gatewayResponse) {
-        res.status(400).json({
-          success: false,
-          message: "Gateway response required for in-app payments"
-        });
-        return;
-      }
-
       // Check if tenant already has an active account-level subscription
       const existingSubscription = await subscriptionService.getActiveSubscription(tenantId);
       if (existingSubscription && existingSubscription.status === "active" && new Date(existingSubscription.endDate) >= new Date()) {
-        res.status(400).json({
-          success: false,
-          message: "You already have an active subscription"
-        });
+        res.status(400).json({ success: false, message: "You already have an active subscription" });
         return;
       }
 
-      // Calculate price
       const price = subscriptionService["calculatePrice"](propertyValueBracket, planType);
 
-      // Create payment (no rentalId for account-level subscription)
-      const payment = await Payment.create({
-        rentalId: null,
-        agreementId: null,
-        propertyId: null,
-        landlordId: new Types.ObjectId(tenantId), // Tenant pays for their own subscription
+      // All online subscription payments go via Paynow (phone already validated above)
+      const reference = paynowService.generateReference("TSUB", tenantId);
+
+      const pendingPayment = await Payment.create({
+        rentalId: null, agreementId: null, propertyId: null,
+        landlordId: new Types.ObjectId(tenantId),
         tenantId: new Types.ObjectId(tenantId),
         paymentType: "service",
-        amount: price,
-        totalAmount: price,
+        amount: price, totalAmount: price,
         paymentMethod: "in_app",
-        status: "verified",
-        verifiedAt: new Date(),
-        gatewayResponse,
-        notes: `Tenant subscription - ${planType}`
+        status: "pending",
+        notes: `Tenant subscription - ${planType}`,
+        paynowReference: reference,
+        paynowMetadata: { paymentPurpose: "tenant_subscription", planType, propertyValueBracket }
       });
 
-      // Create account-level subscription (no rentalId)
-      const subscription = await subscriptionService.createSubscription({
-        tenantId,
-        planType,
-        propertyValueBracket
-      });
-
-      // Create revenue source
-      const revenueSource = await revenueSourceService.createRevenueSource({
-        sourceType: "subscription",
+      const paynowResult = await paynowService.initiateMobilePayment({
+        reference,
+        description: `Tenant ${planType} subscription`,
         amount: price,
-        payerId: tenantId,
-        recipientId: "khayalami",
-        paymentId: payment._id.toString(),
-        rentalId: undefined, // Account-level subscription
-        description: `Tenant subscription - ${planType}`,
-        notes: `Monthly subscription for zero-deposit access`,
-        status: "collected" // In-app payment is immediately collected
+        phone: phone.trim(),
+        method: (mobileMethod && (mobileMethod === "onemoney" || mobileMethod === "ecocash")) ? mobileMethod : "ecocash"
       });
 
-      // Add the subscription payment to escrow for accounting (100% to Khayalami)
-      const { escrowService } = await import("../services/EscrowService");
-      await escrowService.addToEscrow(payment, {
-        deductions: {
-          subscriptionFee: 0,
-          processingFee: 0,
-          insurancePremium: 0
-        },
-        revenueSourceIds: [revenueSource._id.toString()]
-      });
-      await escrowService.updateEscrowStatus(payment._id.toString(), "held");
+      if (!paynowResult.success) {
+        pendingPayment.status = "cancelled";
+        pendingPayment.rejectionReason = paynowResult.error;
+        await pendingPayment.save();
+        res.status(400).json({ success: false, message: paynowResult.error || "Payment initiation failed" });
+        return;
+      }
 
-      res.status(200).json({
+      pendingPayment.pollUrl = paynowResult.pollUrl;
+      await pendingPayment.save();
+
+      res.status(201).json({
         success: true,
-        message: "Subscription activated successfully",
+        message: "Subscription payment initiated. Check your phone.",
         data: {
-          subscription,
-          revenueSource,
-          payment
+          paymentId: pendingPayment._id,
+          reference,
+          pollUrl: paynowResult.pollUrl,
+          instructions: paynowResult.instructions,
+          statusCheckUrl: `/api/webhooks/payment-status/${pendingPayment._id}`
         }
       });
     } catch (error: any) {

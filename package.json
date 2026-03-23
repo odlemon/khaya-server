@@ -48,6 +48,7 @@
     "nodemon": "^3.1.10",
     "passport": "^0.7.0",
     "passport-google-oauth20": "^2.0.0",
+    "paynow": "^2.2.2",
     "socket.io": "^4.8.1",
     "zeptomail": "^6.2.1"
   },
