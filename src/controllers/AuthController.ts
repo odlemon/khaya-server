@@ -351,7 +351,13 @@ export class AuthController {
       }
 
       // Validate role
-      const validRoles = ["tenant", "landlord", "admin"];
+      const validRoles = [
+        "tenant",
+        "landlord",
+        "admin",
+        "insurance_admin",
+        "bank_admin",
+      ];
       if (!validRoles.includes(role)) {
         return res.status(400).json({ success: false, message: "Invalid role." });
       }

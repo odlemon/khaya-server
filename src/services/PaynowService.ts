@@ -461,6 +461,16 @@ class PaynowService {
       revenueSourceIds.push(rev._id.toString());
     }
 
+    if (deductions.insurancePremium > 0) {
+      const rev = await revenueSourceService.createRevenueSource({
+        sourceType: "insurance_commission", amount: deductions.insurancePremium,
+        payerId: userId, recipientId: "khayalami",
+        paymentId: payment._id.toString(), rentalId,
+        description: "Property insurance premium"
+      });
+      revenueSourceIds.push(rev._id.toString());
+    }
+
     await escrowService.addToEscrow(payment, { deductions, revenueSourceIds });
     await escrowService.updateEscrowStatus(payment._id.toString(), "held");
 

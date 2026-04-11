@@ -381,7 +381,7 @@ export interface IPayout extends Document {
     branchCode?: string;
   };
   mobileMoneyDetails?: {
-    provider: "MTN" | "Airtel" | "Vodacom" | "other";
+    provider: "MTN" | "Airtel" | "Vodacom" | "EcoCash" | "other";
     phoneNumber: string;
     accountName: string;
   };
@@ -451,10 +451,10 @@ const payoutSchema = new Schema<IPayout>({
   mobileMoneyDetails: {
     provider: {
       type: String,
-      enum: ["MTN", "Airtel", "Vodacom", "other"]
+      enum: ["MTN", "Airtel", "Vodacom", "EcoCash", "other"],
     },
     phoneNumber: String,
-    accountName: String
+    accountName: String,
   },
   
   status: {

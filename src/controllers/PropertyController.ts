@@ -10,6 +10,7 @@ import { landlordSubscriptionService } from "../services/LandlordSubscriptionSer
 import { favoriteService } from "../services/FavoriteService";
 import { Favorite } from "../models/Favorite";
 import { Types } from "mongoose";
+import { insuranceService } from "../services/InsuranceService";
 
 export class PropertyController {
 
@@ -40,6 +41,16 @@ export class PropertyController {
         return res.status(400).json({ 
           success: false, 
           message: "Main image is required for property listing" 
+        });
+      }
+
+      // Auto-calculate insurance premium if insurance is enabled
+      if (propertyData.insurance?.enabled) {
+        propertyData.insurance.monthlyPremium = insuranceService.calculatePremium({
+          coverageType: propertyData.insurance.coverageType || "basic",
+          riskCategory: propertyData.insurance.riskCategory || "medium",
+          propertyType: propertyData.propertyType,
+          propertyValue: propertyData.insurance.propertyValue,
         });
       }
 
@@ -556,8 +567,20 @@ export class PropertyController {
         });
       }
 
-      // ✨ If propertyProofDocuments are being updated, reset verification status
-      // This ensures new documents need to be reviewed by admin
+      // Auto-recalculate insurance premium if insurance config changed
+      if (updateData.insurance?.enabled) {
+        const merged = { ...property.insurance?.toObject?.() || {}, ...updateData.insurance };
+        updateData.insurance = {
+          ...merged,
+          monthlyPremium: insuranceService.calculatePremium({
+            coverageType: merged.coverageType || "basic",
+            riskCategory: merged.riskCategory || "medium",
+            propertyType: updateData.propertyType || property.propertyType,
+            propertyValue: merged.propertyValue,
+          }),
+        };
+      }
+
       if (updateData.propertyProofDocuments !== undefined) {
         // Reset verification fields when documents are updated
         updateData.isVerified = false;
@@ -1402,6 +1425,49 @@ export class PropertyController {
         message: "Property listing rejected successfully",
         data: propertyData
       });
+    } catch (error: any) {
+      next(error);
+    }
+  }
+
+  /**
+   * POST /api/properties/insurance/preview
+   * Preview insurance pricing breakdown before creating/updating a listing.
+   * Public for landlords (authenticated).
+   */
+  async getInsurancePreview(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { desiredRent, coverageType, riskCategory, pricingModel, propertyType, propertyValue } = req.body;
+
+      if (!desiredRent || !coverageType || !pricingModel) {
+        return res.status(400).json({
+          success: false,
+          message: "Missing required fields: desiredRent, coverageType, pricingModel"
+        });
+      }
+
+      const breakdown = insuranceService.getListingBreakdown({
+        desiredRent,
+        coverageType,
+        riskCategory: riskCategory || "medium",
+        pricingModel,
+        propertyType,
+        propertyValue,
+      });
+
+      res.status(200).json({ success: true, data: breakdown });
+    } catch (error: any) {
+      next(error);
+    }
+  }
+
+  /**
+   * GET /api/properties/insurance/premium-table
+   * Returns the full premium lookup table for the frontend.
+   */
+  async getInsurancePremiumTable(req: Request, res: Response, next: NextFunction) {
+    try {
+      res.status(200).json({ success: true, data: insuranceService.getPremiumTable() });
     } catch (error: any) {
       next(error);
     }

@@ -11,6 +11,10 @@ const router = express.Router();
 router.get("/featured", (req, res, next) => propertyController.getFeaturedProperties(req, res, next));
 router.get("/search/location", (req, res, next) => propertyController.searchByLocation(req, res, next));
 
+// Insurance endpoints (authenticated landlords)
+router.post("/insurance/preview", authenticate, (req, res, next) => propertyController.getInsurancePreview(req, res, next));
+router.get("/insurance/premium-table", authenticate, (req, res, next) => propertyController.getInsurancePremiumTable(req, res, next));
+
 // Main properties route - now requires authentication
 router.get("/", authenticate, (req, res, next) => propertyController.getProperties(req, res, next));
 

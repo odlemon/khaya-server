@@ -6,7 +6,6 @@
  */
 
 import mongoose from "mongoose";
-import bcrypt from "bcrypt";
 import { User } from "../models/User";
 import dotenv from "dotenv";
 
@@ -43,13 +42,10 @@ async function seedAdmin() {
       return;
     }
 
-    // Hash password
-    const hashedPassword = await bcrypt.hash(ADMIN_CREDENTIALS.password, 10);
-
-    // Create admin user
+    // Plain password — User model pre-save hook hashes it once
     const admin = await User.create({
       email: ADMIN_CREDENTIALS.email,
-      password: hashedPassword,
+      password: ADMIN_CREDENTIALS.password,
       firstName: ADMIN_CREDENTIALS.firstName,
       lastName: ADMIN_CREDENTIALS.lastName,
       role: ADMIN_CREDENTIALS.role,

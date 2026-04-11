@@ -3,6 +3,7 @@ import { Rental, IRental } from "../models/Rental";
 import { ConditionLog } from "../models/ConditionLog";
 import { Payment } from "../models/Payment";
 import { Agreement } from "../models/Agreement";
+import { Property } from "../models/Property";
 import { Types } from "mongoose";
 import { TEST_MODE, addMonths } from "../config/testMode";
 
@@ -91,11 +92,30 @@ export class RentalService {
     
     let currentDate = new Date(startDate);
 
+    // Check if property has "added_to_rent" insurance — if so, add the premium to the payment amount
+    let insuranceSurcharge = 0;
+    if (rental.propertyId) {
+      try {
+        const property = await Property.findById(rental.propertyId).select("insurance").lean();
+        if (property?.insurance?.enabled && property.insurance.pricingModel === "added_to_rent" && property.insurance.monthlyPremium > 0) {
+          insuranceSurcharge = property.insurance.monthlyPremium;
+        }
+      } catch (err) {
+        console.warn(`⚠️  Could not check property insurance for rental ${rental._id}`);
+      }
+    }
+
+    const paymentAmount = Math.round((rental.monthlyRent + insuranceSurcharge) * 100) / 100;
+
     console.log(`📊 Payment Schedule Creation Started:`);
     console.log(`   - Rental ID: ${rental._id}`);
     console.log(`   - Start Date: ${startDate.toISOString()}`);
     console.log(`   - End Date: ${endDate.toISOString()}`);
     console.log(`   - Monthly Rent: K${rental.monthlyRent}`);
+    if (insuranceSurcharge > 0) {
+      console.log(`   - Insurance Surcharge: K${insuranceSurcharge} (added_to_rent)`);
+      console.log(`   - Total Monthly Payment: K${paymentAmount}`);
+    }
     console.log(`   - Test Mode: ${TEST_MODE ? 'ENABLED (1 month = 10 minutes)' : 'DISABLED (normal months)'}`);
 
     let paymentCount = 0;
@@ -108,10 +128,10 @@ export class RentalService {
         landlordId: rental.landlordId,
         tenantId: rental.tenantId,
         paymentType: "rent",
-        amount: rental.monthlyRent,
+        amount: paymentAmount,
         dueDate: new Date(currentDate),
         status: "pending",
-        paymentMethod: "in_app" // Required field - default to in_app for scheduled payments
+        paymentMethod: "in_app"
       });
 
       paymentCount++;

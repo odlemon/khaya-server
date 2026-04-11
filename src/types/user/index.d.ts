@@ -49,6 +49,8 @@ export interface User {
 
 export enum UserRole {
   ADMIN = "admin",
+  INSURANCE_ADMIN = "insurance_admin",
+  BANK_ADMIN = "bank_admin",
   LANDLORD = "landlord",
   TENANT = "tenant",
 } 

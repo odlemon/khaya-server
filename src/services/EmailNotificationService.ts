@@ -122,6 +122,29 @@ export class EmailNotificationService {
   }
 
   /**
+   * Landlord: bank has confirmed the outbound transfer (mark-paid in bank admin).
+   */
+  async sendLandlordBankPayoutConfirmed(data: {
+    landlordEmail: string;
+    landlordName: string;
+    amount: number;
+    payoutId: string;
+    externalReference?: string;
+    processedAt: Date;
+  }): Promise<void> {
+    const subject = "Payout sent to your bank - Khayalami";
+    const htmlContent = this.getLandlordBankPayoutConfirmedTemplate(data);
+    const from = getFromAddress("notifications");
+
+    await emailTransport.sendMail({
+      from: `${from.name} <${from.address}>`,
+      to: `${data.landlordName} <${data.landlordEmail}>`,
+      subject,
+      html: htmlContent,
+    });
+  }
+
+  /**
    * Send rent deposited in escrow email (landlord)
    */
   async sendRentDepositedEscrow(data: {
@@ -574,6 +597,52 @@ export class EmailNotificationService {
             <p>The funds have been credited to your Khayalami account balance and are available for withdrawal.</p>
             <p>You can now request a withdrawal through your landlord dashboard.</p>
             <p>If you have any questions, please contact our support team.</p>
+          </div>
+          <div class="footer">
+            <p>© 2025 Khayalami. All rights reserved.</p>
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+  }
+
+  private getLandlordBankPayoutConfirmedTemplate(data: any): string {
+    const refLine =
+      data.externalReference != null && data.externalReference !== ""
+        ? `<p><strong>Bank reference:</strong> ${String(data.externalReference)}</p>`
+        : "";
+    const when = new Date(data.processedAt).toLocaleString();
+    return `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="UTF-8">
+        <style>
+          body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+          .container { max-width: 600px; margin: 0 auto; background: #fff; }
+          .header { background: linear-gradient(135deg, #0d6efd 0%, #6610f2 100%); color: white; padding: 30px; text-align: center; }
+          .content { padding: 30px; }
+          .amount { font-size: 28px; font-weight: bold; color: #0d6efd; text-align: center; margin: 20px 0; }
+          .info-box { background: #f8f9fa; padding: 20px; border-radius: 5px; margin: 20px 0; }
+          .footer { text-align: center; padding: 20px; color: #666; font-size: 14px; }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="header">
+            <h1>Payout confirmed</h1>
+          </div>
+          <div class="content">
+            <p>Hello <strong>${data.landlordName}</strong>,</p>
+            <p>Your bank has recorded the transfer for your Khayalami landlord payout.</p>
+            <div class="amount">$${Number(data.amount).toFixed(2)}</div>
+            <div class="info-box">
+              <p><strong>Payout ID:</strong> ${data.payoutId}</p>
+              <p><strong>Confirmed at:</strong> ${when}</p>
+              ${refLine}
+            </div>
+            <p>Depending on your bank, cleared funds may take a short time to appear. If anything looks wrong, contact support with your payout ID.</p>
           </div>
           <div class="footer">
             <p>© 2025 Khayalami. All rights reserved.</p>

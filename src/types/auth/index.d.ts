@@ -12,7 +12,7 @@ export interface RegisterCredentials {
   firstName: string;
   lastName: string;
   phone?: string;
-  role?: "tenant" | "landlord" | "admin";
+  role?: "tenant" | "landlord" | "admin" | "insurance_admin" | "bank_admin";
   confirmPassword: string;
 }
 
@@ -73,4 +73,6 @@ export enum UserRole {
   TENANT = "tenant",
   LANDLORD = "landlord",
   ADMIN = "admin",
+  INSURANCE_ADMIN = "insurance_admin",
+  BANK_ADMIN = "bank_admin",
 } 

@@ -15,10 +15,12 @@ async function findAdmin() {
     await mongoose.connect(mongoUri);
     console.log('✅ Connected to MongoDB\n');
 
-    const admins = await User.find({ role: 'admin' });
+    const admins = await User.find({
+      role: { $in: ["admin", "insurance_admin", "bank_admin"] },
+    });
     
     if (admins.length === 0) {
-      console.log('❌ No admin users found');
+      console.log('❌ No staff portal users found (admin / insurance_admin / bank_admin)');
     } else {
       console.log(`✅ Found ${admins.length} admin user(s):\n`);
       admins.forEach(admin => {
