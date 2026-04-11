@@ -81,6 +81,16 @@ export interface IProperty extends Document {
   isVerified: boolean;
   isFeatured: boolean;
   
+  // Insurance configuration (set by landlord during listing)
+  insurance?: {
+    enabled: boolean;
+    coverageType: "basic" | "standard" | "premium";
+    pricingModel: "included_in_rent" | "added_to_rent";
+    monthlyPremium: number;
+    propertyValue?: number;
+    riskCategory?: "low" | "medium" | "high";
+  };
+
   // Verification tracking
   verificationRejectionReason?: string;
   verifiedBy?: mongoose.Types.ObjectId;
@@ -195,6 +205,16 @@ const propertySchema = new Schema<IProperty>(
     isVerified: { type: Boolean, default: false },
     isFeatured: { type: Boolean, default: false },
     
+    // Insurance configuration
+    insurance: {
+      enabled: { type: Boolean, default: false },
+      coverageType: { type: String, enum: ["basic", "standard", "premium"], default: "basic" },
+      pricingModel: { type: String, enum: ["included_in_rent", "added_to_rent"], default: "included_in_rent" },
+      monthlyPremium: { type: Number, default: 0, min: 0 },
+      propertyValue: { type: Number, min: 0 },
+      riskCategory: { type: String, enum: ["low", "medium", "high"], default: "medium" },
+    },
+
     // Verification tracking
     verificationRejectionReason: { type: String },
     verifiedBy: { type: Schema.Types.ObjectId, ref: "User" },

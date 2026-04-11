@@ -3,6 +3,7 @@ import { Subscription } from "../models/Subscription";
 import { Types } from "mongoose";
 import { Rental } from "../models/Rental";
 import { Property } from "../models/Property";
+import { insuranceService } from "./InsuranceService";
 
 export interface DeductionBreakdown {
   totalAmount: number;
@@ -114,13 +115,11 @@ export class PaymentCalculationService {
   }
 
   /**
-   * Calculate insurance premium commission (if landlord has insurance)
+   * Calculate insurance premium for a rental's property.
+   * Returns the monthly premium stored on the property (0 if insurance not enabled).
    */
   async calculateInsurancePremium(landlordId: string, rentalId: string): Promise<number> {
-    // TODO: Implement insurance premium calculation
-    // For now, return 0
-    // This will be implemented when insurance system is added
-    return 0;
+    return insuranceService.getRentalInsurancePremium(rentalId);
   }
 
   /**

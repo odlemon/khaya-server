@@ -22,11 +22,18 @@ router.put("/update-role", async (req: Request, res: Response, next: NextFunctio
       });
     }
 
-    const validRoles = ["admin", "landlord", "tenant"];
+    const validRoles = [
+      "admin",
+      "insurance_admin",
+      "bank_admin",
+      "landlord",
+      "tenant",
+    ];
     if (!validRoles.includes(role)) {
       return res.status(400).json({
         success: false,
-        message: "Invalid role. Must be one of: admin, landlord, tenant"
+        message:
+          "Invalid role. Must be one of: admin, insurance_admin, bank_admin, landlord, tenant",
       });
     }
 

@@ -20,15 +20,27 @@ export interface ILandlordBalance extends Document {
   totalEarnings: number; // Lifetime earnings
   totalWithdrawn: number; // Lifetime withdrawals
   
-  // Bank details for withdrawals
+  /**
+   * Exactly one payout destination: `bank` or `ecocash`.
+   * Legacy documents may omit this and only have bankDetails / mobileMoneyDetails.
+   */
+  payoutMethod?: "bank" | "ecocash";
+
+  // Bank details for withdrawals (when payoutMethod is bank)
   bankDetails?: {
     accountName: string;
     accountNumber: string;
     bankName: string;
     branchCode?: string;
   };
-  
-  // Mobile money details
+
+  /** EcoCash (when payoutMethod is ecocash) */
+  ecocashDetails?: {
+    registeredName: string;
+    phoneNumber: string;
+  };
+
+  // Mobile money details (legacy / non–EcoCash)
   mobileMoneyDetails?: {
     provider: "MTN" | "Airtel" | "Vodacom" | "other";
     phoneNumber: string;
@@ -76,18 +88,28 @@ const landlordBalanceSchema = new Schema<ILandlordBalance>({
   pendingBalance: { type: Number, default: 0 },
   totalEarnings: { type: Number, default: 0 },
   totalWithdrawn: { type: Number, default: 0 },
-  
+
+  payoutMethod: {
+    type: String,
+    enum: ["bank", "ecocash"],
+  },
+
   bankDetails: {
     accountName: { type: String },
     accountNumber: { type: String },
     bankName: { type: String },
-    branchCode: { type: String }
+    branchCode: { type: String },
   },
-  
+
+  ecocashDetails: {
+    registeredName: { type: String },
+    phoneNumber: { type: String },
+  },
+
   mobileMoneyDetails: {
     provider: { type: String, enum: ["MTN", "Airtel", "Vodacom", "other"] },
     phoneNumber: { type: String },
-    accountName: { type: String }
+    accountName: { type: String },
   },
   
   transactions: [transactionSchema],

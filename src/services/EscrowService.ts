@@ -6,6 +6,7 @@ import { Payment, IPayment } from "../models/Payment";
 import { LandlordBalance } from "../models/LandlordBalance";
 import { LandlordPreferences } from "../models/LandlordPreferences";
 import { User } from "../models/User";
+import { resolveLandlordPayoutFromBalance } from "../utils/landlordPayoutInstructions";
 import { RevenueSource } from "../models/RevenueSource";
 import { landlordSubscriptionService } from "./LandlordSubscriptionService";
 import { revenueSourceService } from "./RevenueSourceService";
@@ -472,9 +473,10 @@ export class EscrowService {
         }
       }
 
-      // Get landlord balance for bank/mobile money details
+      // Get landlord balance for bank / EcoCash / legacy mobile details
       const landlordBalance = await LandlordBalance.findOne({ landlordId });
-      
+      const payoutSnap = resolveLandlordPayoutFromBalance(landlordBalance);
+
       // Create landlord payout (after subscription deduction)
       const landlordPayout = await Payout.create({
         payoutType: "landlord",
@@ -482,11 +484,9 @@ export class EscrowService {
         recipientType: "landlord",
         amount: totalAmount,
         escrowTransactionIds,
-        payoutMethod: landlordBalance?.bankDetails ? "bank_transfer" : 
-                      landlordBalance?.mobileMoneyDetails ? "mobile_money" : 
-                      "internal_transfer",
-        bankDetails: landlordBalance?.bankDetails,
-        mobileMoneyDetails: landlordBalance?.mobileMoneyDetails,
+        payoutMethod: payoutSnap.payoutMethod,
+        bankDetails: payoutSnap.bankDetails,
+        mobileMoneyDetails: payoutSnap.mobileMoneyDetails,
         status: "pending",
         distributionBatchId: new Types.ObjectId(), // Same batch ID for this distribution
         notes: subscriptionFee > 0 
@@ -561,31 +561,55 @@ export class EscrowService {
       landlordPayoutCount++;
     }
 
-    // Create Khayalami payout (all commissions combined)
-    if (totalKhayalamiAmount > 0) {
+    // Separate insurance premiums from Khayalami amount for insurance partner payout
+    let totalInsuranceAmount = 0;
+    for (const transaction of heldTransactions) {
+      totalInsuranceAmount += transaction.deductions?.insurancePremium || 0;
+    }
+
+    // Remove insurance from Khayalami total (insurance goes to insurance partner, not Khayalami)
+    const khayalamiNet = totalKhayalamiAmount - totalInsuranceAmount;
+
+    // Create insurance partner payout (if any insurance premiums collected)
+    if (totalInsuranceAmount > 0) {
+      const insurancePayout = await Payout.create({
+        payoutType: "khayalami",
+        recipientType: "khayalami",
+        amount: totalInsuranceAmount,
+        escrowTransactionIds: heldTransactions.filter(t => (t.deductions?.insurancePremium || 0) > 0).map(t => t._id),
+        payoutMethod: "internal_transfer",
+        status: "pending",
+        distributionBatchId: new Types.ObjectId(),
+        notes: `Insurance premium distribution - ${heldTransactions.length} transaction(s). To be remitted to insurance partner.`
+      });
+      payoutIds.push(insurancePayout._id.toString());
+      console.log(`🛡️  Insurance partner payout created: K${totalInsuranceAmount}`);
+    }
+
+    // Create Khayalami payout (platform commissions, excluding insurance premiums)
+    if (khayalamiNet > 0) {
       const khayalamiPayout = await Payout.create({
         payoutType: "khayalami",
         recipientType: "khayalami",
-        amount: totalKhayalamiAmount,
+        amount: khayalamiNet,
         escrowTransactionIds: heldTransactions.map(t => t._id),
-        payoutMethod: "internal_transfer", // Goes to Khayalami account
+        payoutMethod: "internal_transfer",
         status: "pending",
         distributionBatchId: new Types.ObjectId(),
-        notes: `Monthly commission distribution - ${heldTransactions.length} transaction(s)`
+        notes: `Monthly commission distribution - ${heldTransactions.length} transaction(s) (insurance premiums excluded)`
       });
 
       payoutIds.push(khayalamiPayout._id.toString());
+    }
 
-      // Update escrow transactions with Khayalami payout info
-      for (const transaction of heldTransactions) {
-        transaction.khayalamiPayoutId = khayalamiPayout._id;
-        transaction.khayalamiPayoutStatus = "pending";
-        transaction.status = "distributed";
-        transaction.distributedAt = new Date();
-        transaction.distributedBy = new Types.ObjectId(distributedBy);
-        transaction.distributionMethod = method;
-        await transaction.save();
-      }
+    // Mark all held transactions as distributed
+    for (const transaction of heldTransactions) {
+      transaction.khayalamiPayoutStatus = "pending";
+      transaction.status = "distributed";
+      transaction.distributedAt = new Date();
+      transaction.distributedBy = new Types.ObjectId(distributedBy);
+      transaction.distributionMethod = method;
+      await transaction.save();
     }
 
     // Update escrow account
@@ -604,7 +628,11 @@ export class EscrowService {
     account.lastDistributionMethod = method;
     await account.save();
 
-    console.log(`✅ Escrow distributed: K${totalDistributed} to ${landlordPayoutCount} landlords, K${totalKhayalamiAmount} to Khayalami`);
+    if (totalInsuranceAmount > 0) {
+      console.log(`✅ Escrow distributed: K${totalDistributed} to ${landlordPayoutCount} landlords, K${khayalamiNet} to Khayalami, K${totalInsuranceAmount} to insurance partner`);
+    } else {
+      console.log(`✅ Escrow distributed: K${totalDistributed} to ${landlordPayoutCount} landlords, K${khayalamiNet} to Khayalami`);
+    }
 
     return {
       success: true,

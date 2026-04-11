@@ -94,11 +94,14 @@ import escrowRoutes from "./routes/escrowRoutes"
 import distributionRoutes from "./routes/distributionRoutes"
 import paymentRequestRoutes from "./routes/paymentRequestRoutes"
 import landlordPreferencesRoutes from "./routes/landlordPreferencesRoutes"
+import landlordPayoutMethodRoutes from "./routes/landlordPayoutMethodRoutes"
 import landlordSubscriptionRoutes from "./routes/landlordSubscriptionRoutes"
 import transactionRoutes from "./routes/transactionRoutes"
 import tenantSubscriptionRoutes from "./routes/tenantSubscriptionRoutes"
 import cronRoutes from "./routes/cronRoutes"
 import webhookRoutes from "./routes/webhookRoutes"
+import insuranceAdminRoutes from "./routes/insuranceAdminRoutes"
+import bankAdminRoutes from "./routes/bankAdminRoutes"
 
 app.use("/api/users", userRoutes)
 app.use("/api/auth", authRoutes)
@@ -129,6 +132,7 @@ app.use("/api/escrow", escrowRoutes)
 app.use("/api/distribution", distributionRoutes)
 app.use("/api/payment-requests", paymentRequestRoutes)
 app.use("/api/landlord/preferences", landlordPreferencesRoutes)
+app.use("/api/landlord/payout-method", landlordPayoutMethodRoutes)
 app.use("/api/landlord/subscription", landlordSubscriptionRoutes)
 app.use("/api/tenant/subscription", tenantSubscriptionRoutes)
 app.use("/api/admin/dashboard", adminDashboardRoutes)
@@ -136,6 +140,8 @@ app.use("/api/admin/reports", adminReportRoutes)
 app.use("/api/transactions", transactionRoutes)
 app.use("/api/cron", cronRoutes)
 app.use("/api/webhooks", webhookRoutes)
+app.use("/api/insurance-admin", insuranceAdminRoutes)
+app.use("/api/bank-admin", bankAdminRoutes)
 app.use(errorMiddleware)
 
 // Initialize Socket.IO service

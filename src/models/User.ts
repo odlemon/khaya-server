@@ -8,7 +8,7 @@ export interface IUser extends Document {
   email: string;
   password: string;
   phone?: string;
-  role: "admin" | "landlord" | "tenant";
+  role: "admin" | "insurance_admin" | "bank_admin" | "landlord" | "tenant";
   isVerified: boolean;
   isActive: boolean;
   twoFactorEnabled: boolean;
@@ -121,7 +121,11 @@ const userSchema = new Schema<IUser>(
     email: { type: String, required: true, unique: true, lowercase: true, trim: true },
     password: { type: String, required: true },
     phone: { type: String, trim: true },
-    role: { type: String, enum: ["admin", "landlord", "tenant"], default: "tenant" },
+    role: {
+      type: String,
+      enum: ["admin", "insurance_admin", "bank_admin", "landlord", "tenant"],
+      default: "tenant",
+    },
     isVerified: { type: Boolean, default: false },
     isActive: { type: Boolean, default: true },
     twoFactorEnabled: { type: Boolean, default: false },
