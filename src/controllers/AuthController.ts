@@ -43,7 +43,17 @@ export class AuthController {
       // Check if user already exists
       const existingUser = await User.findOne({ email: normalizedEmail });
       if (existingUser) {
-        return res.status(409).json({ success: false, message: "Email already registered." });
+        // Soft-deleted account (was verified, then closed): do not allow re-use of email
+        if (!existingUser.isActive && existingUser.isVerified) {
+          return res.status(409).json({
+            success: false,
+            message: "This email is no longer available. Please use a different email address.",
+          });
+        }
+        return res.status(409).json({
+          success: false,
+          message: "This email is already in use. Please use another email or try signing in.",
+        });
       }
   
       // Create user with selected role (not verified initially)
@@ -114,7 +124,10 @@ export class AuthController {
       console.error("Registration error:", error);
   
       if (error.code === 11000) {
-        return res.status(409).json({ success: false, message: "Email already registered." });
+        return res.status(409).json({
+          success: false,
+          message: "This email is already in use. Please use another email or try signing in.",
+        });
       }
   
       next(error);
@@ -134,12 +147,18 @@ export class AuthController {
         return res.status(401).json({ success: false, message: "Invalid credentials." });
       }
 
-      // Check if user is active
+      // Inactive: unverified new signup (needs PIN) vs soft-deleted (verified, then closed)
       if (!user.isActive) {
-        return res.status(401).json({ 
-          success: false, 
+        if (user.isVerified) {
+          return res.status(401).json({
+            success: false,
+            message: "This account does not exist.",
+          });
+        }
+        return res.status(401).json({
+          success: false,
           message: "Account is not verified. Please check your email for verification PIN to activate your account.",
-          requiresEmailVerification: true
+          requiresEmailVerification: true,
         });
       }
 

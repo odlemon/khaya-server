@@ -14,7 +14,7 @@ export interface User {
     location?: string
     dateOfBirth?: Date
     idNumber?: string
-    idType?: "passport" | "national_id" | "drivers_license"
+    idType?: "passport" | "national_id"
   }
   preferences?: {
     theme?: string

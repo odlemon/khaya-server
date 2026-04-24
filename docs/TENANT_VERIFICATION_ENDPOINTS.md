@@ -29,7 +29,7 @@ Authorization: Bearer <tenant_token>
       "employmentLetter"
     ],
     "documentDescriptions": {
-      "idDocument": "Government-issued ID (Passport, National ID, or Driver's License)",
+      "idDocument": "Government-issued ID (Passport or National ID)",
       "payslips": "Recent payslips (last 3 months)",
       "utilityBills": "Utility bills (electricity, water, internet) in your name",
       "bankStatements": "Bank statements (last 3 months)",
@@ -71,7 +71,7 @@ Content-Type: application/json
 ### **Request Body Fields:**
 - `documentType` (string, required): One of: `idDocument`, `payslips`, `utilityBills`, `bankStatements`, `employmentLetter`
 - `urls` (array, required): Array of Firebase URLs for the documents
-- `documentSubType` (string, optional): For ID documents only - `passport`, `national_id`, or `drivers_license`
+- `documentSubType` (string, optional): For ID documents only - `passport` or `national_id`
 
 ### **Response (Success):**
 ```json

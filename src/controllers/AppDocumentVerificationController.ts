@@ -49,13 +49,13 @@ export class AppDocumentVerificationController {
    */
   async getTenantRequiredDocuments(req: Request, res: Response, next: NextFunction) {
     try {
-      const requiredDocuments = ["idDocument", "payslips", "utilityBills", "bankStatements"];
-      const optionalDocuments = ["employmentLetter"];
+      const requiredDocuments = ["idDocument"];
+      const optionalDocuments = ["payslips", "utilityBills", "bankStatements", "employmentLetter"];
       const documentDescriptions = {
-        idDocument: "Government-issued ID (Passport, National ID, or Driver's License)",
-        payslips: "Recent payslips (last 3 months)",
-        utilityBills: "Utility bills (electricity, water, internet) in your name",
-        bankStatements: "Bank statements (last 3 months)",
+        idDocument: "Government-issued ID (Passport or National ID)",
+        payslips: "Recent payslips (last 3 months) (optional)",
+        utilityBills: "Utility bills (electricity, water, internet) in your name (optional)",
+        bankStatements: "Bank statements (last 3 months) (optional)",
         employmentLetter: "Employment verification letter from your employer (optional)"
       };
 
@@ -73,6 +73,7 @@ export class AppDocumentVerificationController {
             "Ensure all text is visible and not cut off",
             "Documents should be recent (within 3 months for financial documents)",
             "Make sure documents are in your name",
+            "Payslips, utility bills and bank statements are optional but recommended",
             "Employment letter is optional but recommended"
           ]
         }
@@ -89,7 +90,7 @@ export class AppDocumentVerificationController {
     try {
       const requiredDocuments = ["idDocument", "propertyProof", "propertyDocuments"];
       const documentDescriptions = {
-        idDocument: "Government-issued ID (Passport, National ID, or Driver's License)",
+        idDocument: "Government-issued ID (Passport or National ID)",
         propertyProof: "Property ownership documents (title deed, lease agreement, property registration)",
         propertyDocuments: "Additional property documents (insurance, permits, property tax receipts)"
       };
@@ -364,14 +365,14 @@ export class AppDocumentVerificationController {
   private getDocumentDescriptions(role: string): Record<string, string> {
     const descriptions: Record<string, Record<string, string>> = {
       tenant: {
-        idDocument: "Government-issued ID (Passport, National ID, or Driver's License)",
+        idDocument: "Government-issued ID (Passport or National ID)",
         payslips: "Recent payslips (last 3 months)",
         utilityBills: "Utility bills (electricity, water, internet) in your name",
         bankStatements: "Bank statements (last 3 months)",
         employmentLetter: "Employment verification letter from your employer (optional)"
       },
       landlord: {
-        idDocument: "Government-issued ID (Passport, National ID, or Driver's License)"
+        idDocument: "Government-issued ID (Passport or National ID)"
       }
     };
 

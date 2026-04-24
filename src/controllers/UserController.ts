@@ -3,6 +3,7 @@ import { Request, Response, NextFunction } from "express";
 import { User } from "../models/User";
 import { Types } from "mongoose";
 import { Agreement } from "../models/Agreement";
+import { Rental } from "../models/Rental";
 
 export class UserController {
 
@@ -172,6 +173,77 @@ export class UserController {
     } catch (error) {
       next(error);
       return;
+    }
+  }
+
+  /**
+   * Self-service account deletion (tenant or landlord).
+   * If user has any active agreement or rental, block and ask to terminate first.
+   *
+   * DELETE /api/users/me
+   */
+  async deleteMyAccount(req: Request, res: Response, next: NextFunction) {
+    try {
+      const userId = (req as any).user?._id?.toString?.();
+      const role = (req as any).user?.role;
+
+      if (!userId) {
+        return res.status(401).json({ success: false, message: "Unauthorized" });
+      }
+
+      if (!["tenant", "landlord"].includes(role)) {
+        return res.status(403).json({
+          success: false,
+          message: "Only tenants and landlords can delete their account.",
+        });
+      }
+
+      const uid = new Types.ObjectId(userId);
+
+      const activeAgreement = await Agreement.findOne({
+        $or: [{ tenantId: uid }, { landlordId: uid }],
+        status: { $in: ["active", "signed", "pending_termination"] },
+      })
+        .select("_id status")
+        .lean();
+
+      if (activeAgreement) {
+        return res.status(409).json({
+          success: false,
+          message:
+            "You cannot delete your account while you have an active agreement. Please terminate your agreement first.",
+        });
+      }
+
+      const activeRental = await Rental.findOne({
+        $or: [{ tenantId: uid }, { landlordId: uid }],
+        status: { $in: ["active", "suspended"] },
+      })
+        .select("_id status")
+        .lean();
+
+      if (activeRental) {
+        return res.status(409).json({
+          success: false,
+          message:
+            "You cannot delete your account while you have an active rental. Please terminate your rental first.",
+        });
+      }
+
+      const user = await User.findById(uid);
+      if (!user) {
+        return res.status(404).json({ success: false, message: "User not found" });
+      }
+
+      user.isActive = false;
+      await user.save();
+
+      return res.status(200).json({
+        success: true,
+        message: "Your account has been deleted successfully.",
+      });
+    } catch (error: any) {
+      next(error);
     }
   }
 

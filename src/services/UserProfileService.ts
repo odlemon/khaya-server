@@ -27,7 +27,7 @@ export class UserProfileService {
         location?: string;
         dateOfBirth?: Date;
         idNumber?: string;
-        idType?: "passport" | "national_id" | "drivers_license";
+        idType?: "passport" | "national_id";
       };
       preferences?: {
         theme?: string;
@@ -76,7 +76,12 @@ export class UserProfileService {
       if (updateData.profile.location) user.profile.location = updateData.profile.location;
       if (updateData.profile.dateOfBirth) user.profile.dateOfBirth = updateData.profile.dateOfBirth;
       if (updateData.profile.idNumber) user.profile.idNumber = updateData.profile.idNumber;
-      if (updateData.profile.idType) user.profile.idType = updateData.profile.idType;
+      if (updateData.profile.idType) {
+        if (!["passport", "national_id"].includes(updateData.profile.idType)) {
+          throw new Error("Invalid idType. Allowed: passport, national_id");
+        }
+        user.profile.idType = updateData.profile.idType;
+      }
     }
 
     // Update preferences
