@@ -38,6 +38,12 @@ export class DocumentVerificationService {
 
       switch (data.documentType) {
         case "idDocument":
+          if (data.documentSubType && !["passport", "national_id"].includes(data.documentSubType)) {
+            return {
+              success: false,
+              message: "Invalid ID document type. Allowed: passport, national_id"
+            };
+          }
           updateData["documentVerification.documents.idDocument"] = {
             url: data.urls[0],
             type: data.documentSubType || "national_id",
@@ -302,14 +308,15 @@ export class DocumentVerificationService {
   /**
    * Get required documents for role
    * Note: employmentLetter is optional for tenants
+   * Note: utilityBills and bankStatements are optional for tenants
    * Note: Landlords only need idDocument (property proof is now per-listing)
    */
   static getRequiredDocuments(role: string): string[] {
     const commonDocuments = ["idDocument"];
     
     if (role === "tenant") {
-      // employmentLetter is optional, not required
-      return [...commonDocuments, "payslips", "utilityBills", "bankStatements"];
+      // Financial documents are optional; only ID is required for now
+      return commonDocuments;
     } else if (role === "landlord") {
       // Landlords only need ID document - property proof is uploaded per listing
       return commonDocuments;

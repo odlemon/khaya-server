@@ -20,7 +20,8 @@ export class ConnectionController {
         landlordId, 
         message,
         expectedMoveInDate,
-        expectedBudget,
+        expectedBudgetMin,
+        expectedBudgetMax,
         numberOfOccupants,
         employmentStatus,
         leaseDurationMonths,
@@ -90,7 +91,32 @@ export class ConnectionController {
 
       const tenantDetails: any = {};
       if (expectedMoveInDate) tenantDetails.expectedMoveInDate = new Date(expectedMoveInDate);
-      if (expectedBudget !== undefined) tenantDetails.expectedBudget = Number(expectedBudget);
+      if (expectedBudgetMin !== undefined || expectedBudgetMax !== undefined) {
+        const min = expectedBudgetMin !== undefined ? Number(expectedBudgetMin) : undefined;
+        const max = expectedBudgetMax !== undefined ? Number(expectedBudgetMax) : undefined;
+
+        if (min !== undefined && (!Number.isFinite(min) || min < 0)) {
+          return res.status(400).json({
+            success: false,
+            message: "expectedBudgetMin must be a number >= 0"
+          });
+        }
+        if (max !== undefined && (!Number.isFinite(max) || max < 0)) {
+          return res.status(400).json({
+            success: false,
+            message: "expectedBudgetMax must be a number >= 0"
+          });
+        }
+        if (min !== undefined && max !== undefined && min > max) {
+          return res.status(400).json({
+            success: false,
+            message: "expectedBudgetMin cannot be greater than expectedBudgetMax"
+          });
+        }
+
+        if (min !== undefined) tenantDetails.expectedBudgetMin = min;
+        if (max !== undefined) tenantDetails.expectedBudgetMax = max;
+      }
       if (numberOfOccupants !== undefined) tenantDetails.numberOfOccupants = Number(numberOfOccupants);
       if (employmentStatus) tenantDetails.employmentStatus = employmentStatus;
       if (leaseDurationMonths !== undefined) tenantDetails.leaseDurationMonths = Number(leaseDurationMonths);

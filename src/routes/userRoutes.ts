@@ -23,6 +23,9 @@ router.get("/preferences", (req, res, next) => userController.getPreferences(req
 // Update user preferences
 router.put("/preferences", (req, res, next) => userController.updatePreferences(req, res, next));
 
+// Delete my account (tenant or landlord)
+router.delete("/me", (req, res, next) => userController.deleteMyAccount(req, res, next));
+
 // Verify current password
 router.post("/verify-password", (req, res, next) => userController.verifyCurrentPassword(req, res, next));
 

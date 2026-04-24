@@ -8,7 +8,12 @@ export interface IConnection extends Document {
   status: "pending" | "accepted" | "rejected";
   message: string;
   expectedMoveInDate?: Date;
-  expectedBudget?: number;
+  /**
+   * Preferred monthly budget range (tenant-provided).
+   * Frontend should send expectedBudgetMin/expectedBudgetMax.
+   */
+  expectedBudgetMin?: number;
+  expectedBudgetMax?: number;
   numberOfOccupants?: number;
   employmentStatus?: "employed" | "self-employed" | "student" | "unemployed" | "retired" | "other";
   leaseDurationMonths?: number;
@@ -52,7 +57,11 @@ const connectionSchema = new Schema<IConnection>({
   expectedMoveInDate: {
     type: Date
   },
-  expectedBudget: {
+  expectedBudgetMin: {
+    type: Number,
+    min: 0
+  },
+  expectedBudgetMax: {
     type: Number,
     min: 0
   },
