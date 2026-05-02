@@ -16,6 +16,47 @@ function isLandlordPayout(doc: any) {
   );
 }
 
+/** New insurance batches */
+function isInsurancePartnerPayout(doc: any) {
+  return (
+    doc &&
+    doc.payoutType === "insurance_partner" &&
+    doc.recipientType === "insurance_partner"
+  );
+}
+
+/**
+ * Older distributions stored insurance premiums as a second khayalami payout
+ * with notes mentioning insurance — same bank settlement flow.
+ */
+function isLegacyInsuranceAsKhayalamiPayout(doc: any) {
+  return (
+    doc &&
+    doc.payoutType === "khayalami" &&
+    doc.recipientType === "khayalami" &&
+    typeof doc.notes === "string" &&
+    /Insurance premium distribution/i.test(doc.notes)
+  );
+}
+
+function isInsurancePartnerBankPayout(doc: any) {
+  return isInsurancePartnerPayout(doc) || isLegacyInsuranceAsKhayalamiPayout(doc);
+}
+
+/** Mongo match for bank insurance settlement list / aggregates */
+function insurancePartnerPayoutRootMatch() {
+  return {
+    $or: [
+      { payoutType: "insurance_partner", recipientType: "insurance_partner" },
+      {
+        payoutType: "khayalami",
+        recipientType: "khayalami",
+        notes: { $regex: "Insurance premium distribution", $options: "i" },
+      },
+    ],
+  };
+}
+
 /** Populated Property subdoc on an escrow row */
 function isPopulatedProperty(prop: any): boolean {
   return prop && typeof prop === "object" && prop._id && prop.title != null;
@@ -103,6 +144,40 @@ function formatEscrowLineForBankAdmin(
   };
 }
 
+function formatInsuranceEscrowLineForBankAdmin(
+  t: any,
+  rentalPropertyMap: Map<string, { _id: any; title?: string; address?: any }>,
+) {
+  const base = formatEscrowLineForBankAdmin(t, rentalPropertyMap);
+  const landlordDoc =
+    t.landlordId && typeof t.landlordId === "object" && t.landlordId._id
+      ? t.landlordId
+      : null;
+  return {
+    ...base,
+    insurancePremium: t.deductions?.insurancePremium ?? 0,
+    deductions: t.deductions
+      ? {
+          subscriptionFee: t.deductions.subscriptionFee ?? 0,
+          processingFee: t.deductions.processingFee ?? 0,
+          insurancePremium: t.deductions.insurancePremium ?? 0,
+          totalDeductions: t.deductions.totalDeductions ?? 0,
+        }
+      : null,
+    insurancePartnerPayoutStatus: t.insurancePartnerPayoutStatus ?? null,
+    insurancePartnerPayoutDate: t.insurancePartnerPayoutDate ?? null,
+    landlord: landlordDoc
+      ? {
+          userId: landlordDoc._id,
+          firstName: landlordDoc.firstName,
+          lastName: landlordDoc.lastName,
+          email: landlordDoc.email,
+          phone: landlordDoc.phone ?? null,
+        }
+      : null,
+  };
+}
+
 export class BankAdminService {
   /**
    * Dashboard headline numbers: escrow health + landlord payout pipeline.
@@ -161,6 +236,47 @@ export class BankAdminService {
       },
     ]);
 
+    const insMatch = insurancePartnerPayoutRootMatch();
+
+    const [insPendingSlice] = await Payout.aggregate([
+      { $match: { ...insMatch, status: { $in: ["pending", "processing"] } } },
+      {
+        $group: {
+          _id: null,
+          count: { $sum: 1 },
+          totalAmount: { $sum: "$amount" },
+        },
+      },
+    ]);
+
+    const [insCompletedSlice] = await Payout.aggregate([
+      { $match: { ...insMatch, status: "completed" } },
+      {
+        $group: {
+          _id: null,
+          count: { $sum: 1 },
+          totalAmount: { $sum: "$amount" },
+        },
+      },
+    ]);
+
+    const [awaitingInsuranceRemittance] = await EscrowTransaction.aggregate([
+      {
+        $match: {
+          status: "distributed",
+          "deductions.insurancePremium": { $gt: 0 },
+          insurancePartnerPayoutStatus: { $nin: ["paid", "failed"] },
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          count: { $sum: 1 },
+          totalInsurancePremium: { $sum: "$deductions.insurancePremium" },
+        },
+      },
+    ]);
+
     return {
       escrow: {
         totalHeld: escrow.totalHeld,
@@ -187,13 +303,31 @@ export class BankAdminService {
           totalLandlordAmount: awaitingBankTransfer?.totalLandlordAmount ?? 0,
         },
       },
+      insurancePartnerPayouts: {
+        recordsAwaitingSettlement: {
+          count: insPendingSlice?.count ?? 0,
+          totalAmount: insPendingSlice?.totalAmount ?? 0,
+        },
+        settledOutsideSystemLifetime: {
+          count: insCompletedSlice?.count ?? 0,
+          totalAmount: insCompletedSlice?.totalAmount ?? 0,
+        },
+        distributedEscrowRowsAwaitingInsuranceRemittance: {
+          escrowTransactionCount: awaitingInsuranceRemittance?.count ?? 0,
+          totalInsurancePremium: awaitingInsuranceRemittance?.totalInsurancePremium ?? 0,
+        },
+      },
       notes: {
         currency:
           "All amounts are stored in the platform's primary currency (same as Escrow / Payment models).",
         markPaid:
           "Use mark-paid on a landlord Payout after funds leave the bank. Linked escrow rows are updated to landlordPayoutStatus paid.",
+        markInsurancePaid:
+          "POST /api/bank-admin/insurance-payouts/:payoutId/mark-paid after remitting aggregated premiums to the insurance partner. Escrow lines get insurancePartnerPayoutStatus paid.",
         preDistribution:
           "pendingLandlordShareInEscrow is rent still in escrow (held) before Khayalami runs distribution.recordsAwaitingSettlement is Payout documents waiting for your transfer.",
+        legacyInsurancePayouts:
+          "Some historical batches use payoutType khayalami with notes containing 'Insurance premium distribution'; list/detail/mark-paid treat them like insurance partner payouts.",
       },
     };
   }
@@ -477,6 +611,178 @@ export class BankAdminService {
         processedAt: payout.processedAt,
         externalReference: payout.externalReference ?? null,
         emailSent,
+      },
+    };
+  }
+
+  async listInsurancePartnerPayouts(params: {
+    page: number;
+    limit: number;
+    status: string;
+  }) {
+    const page = Math.max(1, params.page);
+    const limit = Math.min(100, Math.max(1, params.limit));
+    const skip = (page - 1) * limit;
+
+    const query: any = { ...insurancePartnerPayoutRootMatch() };
+
+    if (
+      params.status &&
+      params.status !== "all" &&
+      ["pending", "processing", "completed", "failed", "cancelled"].includes(
+        params.status,
+      )
+    ) {
+      query.status = params.status;
+    }
+
+    const [total, payouts] = await Promise.all([
+      Payout.countDocuments(query),
+      Payout.find(query)
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+    ]);
+
+    const data = payouts.map((p) => ({
+      payoutId: p._id,
+      payoutType: p.payoutType,
+      recipientType: p.recipientType,
+      isLegacyKhayalamiInsuranceBatch: isLegacyInsuranceAsKhayalamiPayout(p),
+      amount: p.amount,
+      status: p.status,
+      payoutMethod: p.payoutMethod,
+      bankDetails: p.bankDetails ?? null,
+      mobileMoneyDetails: p.mobileMoneyDetails ?? null,
+      externalReference: p.externalReference ?? null,
+      processedAt: p.processedAt ?? null,
+      notes: p.notes ?? null,
+      createdAt: p.createdAt,
+      escrowTransactionCount: p.escrowTransactionIds?.length ?? 0,
+    }));
+
+    return {
+      payouts: data,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit) || 0,
+      },
+    };
+  }
+
+  async getInsurancePartnerPayoutById(payoutId: string) {
+    if (!mongoose.Types.ObjectId.isValid(payoutId)) {
+      return { error: "invalid_id" as const };
+    }
+
+    const p = await Payout.findById(payoutId).lean();
+
+    if (!p || !isInsurancePartnerBankPayout(p)) {
+      return { error: "not_found" as const };
+    }
+
+    const escrowRows = await EscrowTransaction.find({
+      _id: { $in: p.escrowTransactionIds || [] },
+    })
+      .select(
+        "totalAmount landlordAmount khayalamiAmount deductions status paymentType createdAt distributedAt propertyId rentalId landlordId insurancePartnerPayoutStatus insurancePartnerPayoutDate",
+      )
+      .populate("propertyId", "title address")
+      .populate("landlordId", "firstName lastName email phone")
+      .lean();
+
+    const rentalPropertyMap = await rentalIdToPropertyMap(escrowRows);
+    const escrowTransactions = escrowRows.map((t) =>
+      formatInsuranceEscrowLineForBankAdmin(t, rentalPropertyMap),
+    );
+
+    return {
+      data: {
+        payoutId: p._id,
+        payoutType: p.payoutType,
+        recipientType: p.recipientType,
+        isLegacyKhayalamiInsuranceBatch: isLegacyInsuranceAsKhayalamiPayout(p),
+        amount: p.amount,
+        status: p.status,
+        payoutMethod: p.payoutMethod,
+        bankDetails: p.bankDetails ?? null,
+        mobileMoneyDetails: p.mobileMoneyDetails ?? null,
+        externalReference: p.externalReference ?? null,
+        processedAt: p.processedAt ?? null,
+        processedBy: p.processedBy ?? null,
+        notes: p.notes ?? null,
+        createdAt: p.createdAt,
+        escrowTransactions,
+      },
+    };
+  }
+
+  /**
+   * After the bank remits aggregated insurance premiums to the partner outside
+   * the platform, mark the payout completed and sync escrow rows.
+   */
+  async markInsurancePartnerPayoutPaid(
+    payoutId: string,
+    bankAdminId: string,
+    opts: { externalReference?: string; notes?: string },
+  ) {
+    if (!mongoose.Types.ObjectId.isValid(payoutId)) {
+      return { error: "invalid_id" as const };
+    }
+
+    const payout = await Payout.findById(payoutId);
+    if (!payout || !isInsurancePartnerBankPayout(payout)) {
+      return { error: "not_found" as const };
+    }
+
+    if (payout.status === "completed") {
+      return { error: "already_completed" as const };
+    }
+
+    if (payout.status === "cancelled") {
+      return { error: "cancelled_payout" as const };
+    }
+
+    const now = new Date();
+    payout.status = "completed";
+    payout.processedAt = now;
+    payout.processedBy = new mongoose.Types.ObjectId(bankAdminId);
+
+    if (opts.externalReference != null && opts.externalReference !== "") {
+      payout.externalReference = String(opts.externalReference).trim();
+    }
+
+    if (opts.notes != null && opts.notes !== "") {
+      const tag = `[bank insurance mark-paid ${now.toISOString()}] ${opts.notes.trim()}`;
+      payout.notes = payout.notes ? `${payout.notes}\n${tag}` : tag;
+    }
+
+    await payout.save();
+
+    const ids = (payout.escrowTransactionIds || []).filter(Boolean);
+    if (ids.length > 0) {
+      await EscrowTransaction.updateMany(
+        { _id: { $in: ids } },
+        {
+          $set: {
+            insurancePartnerPayoutStatus: "paid",
+            insurancePartnerPayoutDate: now,
+            insurancePartnerPayoutId: payout._id,
+          },
+        },
+      );
+    }
+
+    return {
+      data: {
+        payoutId: payout._id,
+        status: payout.status,
+        processedAt: payout.processedAt,
+        externalReference: payout.externalReference ?? null,
+        escrowTransactionsUpdated: ids.length,
       },
     };
   }

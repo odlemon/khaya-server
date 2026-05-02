@@ -4,6 +4,7 @@ import { Request, Response, NextFunction } from "express";
 import { User } from "../models/User";
 import { EmailVerificationService } from "../services/EmailVerificationService";
 import { TwoFactorAuthService } from "../services/TwoFactorAuthService";
+import { PasswordResetService } from "../services/PasswordResetService";
 import jwt from "jsonwebtoken";
 
 const JWT_SECRET = process.env.JWT_SECRET || "your_jwt_secret";
@@ -147,6 +148,14 @@ export class AuthController {
         return res.status(401).json({ success: false, message: "Invalid credentials." });
       }
 
+      if (user.adminTerminatedAt) {
+        return res.status(403).json({
+          success: false,
+          message: "This account has been disabled. Please contact support if you believe this is an error.",
+          code: "ACCOUNT_ADMIN_TERMINATED",
+        });
+      }
+
       // Inactive: unverified new signup (needs PIN) vs soft-deleted (verified, then closed)
       if (!user.isActive) {
         if (user.isVerified) {
@@ -280,6 +289,14 @@ export class AuthController {
           });
         }
 
+        if (user.adminTerminatedAt) {
+          return res.status(403).json({
+            success: false,
+            message: "This account has been disabled.",
+            code: "ACCOUNT_ADMIN_TERMINATED",
+          });
+        }
+
         const token = jwt.sign({
           userId: user._id,
           role: user.role,
@@ -329,6 +346,14 @@ export class AuthController {
         return res.status(404).json({ success: false, message: "User not found" });
       }
 
+      if (user.adminTerminatedAt) {
+        return res.status(403).json({
+          success: false,
+          message: "This account has been disabled.",
+          code: "ACCOUNT_ADMIN_TERMINATED",
+        });
+      }
+
       // Get document verification status
       const documentVerificationStatus = user.documentVerification?.status || "unverified";
       const isDocumentVerified = documentVerificationStatus === "verified";
@@ -353,6 +378,61 @@ export class AuthController {
         },
       });
     } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * Request password reset email (public). Does not reveal whether the email exists.
+   */
+  async forgotPassword(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { email } = req.body || {};
+      if (!email || typeof email !== "string" || !email.trim()) {
+        return res.status(400).json({ success: false, message: "Email is required." });
+      }
+
+      try {
+        await PasswordResetService.requestReset(email);
+      } catch (sendErr: any) {
+        console.error("Password reset email failed:", sendErr?.message || sendErr);
+        return res.status(503).json({
+          success: false,
+          message: "Unable to send reset email at this time. Please try again later.",
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+        message:
+          "If an account exists for that email, password reset instructions have been sent. Check your inbox.",
+      });
+    } catch (error: any) {
+      next(error);
+    }
+  }
+
+  /**
+   * Complete password reset with token from email (public).
+   */
+  async resetPassword(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { token, newPassword, confirmPassword } = req.body || {};
+      if (confirmPassword !== undefined && confirmPassword !== newPassword) {
+        return res.status(400).json({ success: false, message: "Passwords do not match." });
+      }
+
+      const result = await PasswordResetService.confirmReset(
+        typeof token === "string" ? token : "",
+        typeof newPassword === "string" ? newPassword : ""
+      );
+
+      if (!result.success) {
+        return res.status(400).json({ success: false, message: result.message });
+      }
+
+      return res.status(200).json({ success: true, message: result.message });
+    } catch (error: any) {
       next(error);
     }
   }

@@ -31,6 +31,13 @@ export async function authenticate(req: AuthRequest, res: Response, next: NextFu
     const decoded = jwt.verify(token, JWT_SECRET) as { userId: string };
     const user = await User.findById(decoded.userId);
     if (!user) return next(new Error("User not found"));
+    if (user.adminTerminatedAt) {
+      return res.status(403).json({
+        success: false,
+        message: "This account has been disabled.",
+        code: "ACCOUNT_ADMIN_TERMINATED",
+      });
+    }
     req.user = user;
     next();
   } catch (err) {

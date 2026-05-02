@@ -9,6 +9,7 @@ import { Connection } from "../models/Connection";
 import { Chat } from "../models/Chat";
 import { CommissionService } from "./CommissionService";
 import { Types } from "mongoose";
+import { NOT_ADMIN_TERMINATED } from "../constants/userQueries";
 
 export class AdminDashboardService {
   private commissionService = new CommissionService();
@@ -48,9 +49,9 @@ export class AdminDashboardService {
         commissionSummary
       ] = await Promise.all([
         // Basic counts
-        User.countDocuments(),
-        User.countDocuments({ role: "landlord" }),
-        User.countDocuments({ role: "tenant" }),
+        User.countDocuments({ ...NOT_ADMIN_TERMINATED }),
+        User.countDocuments({ role: "landlord", ...NOT_ADMIN_TERMINATED }),
+        User.countDocuments({ role: "tenant", ...NOT_ADMIN_TERMINATED }),
         Property.countDocuments(),
         Agreement.countDocuments(),
         Rental.countDocuments(),
@@ -60,7 +61,10 @@ export class AdminDashboardService {
         Chat.countDocuments(),
         
         // Recent activity (last 30 days)
-        User.find({ createdAt: { $gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) } })
+        User.find({
+          createdAt: { $gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) },
+          ...NOT_ADMIN_TERMINATED,
+        })
           .sort({ createdAt: -1 })
           .limit(10)
           .select("firstName lastName email role createdAt"),
@@ -245,7 +249,7 @@ export class AdminDashboardService {
     sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
     
     const result = await User.aggregate([
-      { $match: { createdAt: { $gte: sixMonthsAgo } } },
+      { $match: { $and: [{ createdAt: { $gte: sixMonthsAgo } }, NOT_ADMIN_TERMINATED] } },
       {
         $group: {
           _id: {
@@ -430,7 +434,7 @@ export class AdminDashboardService {
     twelveMonthsAgo.setMonth(twelveMonthsAgo.getMonth() - 12);
     
     const result = await User.aggregate([
-      { $match: { createdAt: { $gte: twelveMonthsAgo } } },
+      { $match: { $and: [{ createdAt: { $gte: twelveMonthsAgo } }, NOT_ADMIN_TERMINATED] } },
       {
         $group: {
           _id: {
@@ -514,7 +518,7 @@ export class AdminDashboardService {
     const [userTrends, paymentTrends, serviceTrends] = await Promise.all([
       // User trends
       User.aggregate([
-        { $match: { createdAt: { $gte: sixMonthsAgo } } },
+        { $match: { $and: [{ createdAt: { $gte: sixMonthsAgo } }, NOT_ADMIN_TERMINATED] } },
         {
           $group: {
             _id: {

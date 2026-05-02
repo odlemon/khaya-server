@@ -178,7 +178,8 @@ export class ConnectionStatusService {
           total: 0,
           pending: 0,
           accepted: 0,
-          rejected: 0
+          rejected: 0,
+          cancelled: 0
         };
       }
 
@@ -201,11 +202,14 @@ export class ConnectionStatusService {
         total: 0,
         pending: 0,
         accepted: 0,
-        rejected: 0
+        rejected: 0,
+        cancelled: 0
       };
 
       stats.forEach(stat => {
-        result[stat._id] = stat.count;
+        if (stat._id && result.hasOwnProperty(stat._id)) {
+          result[stat._id] = stat.count;
+        }
         result.total += stat.count;
       });
 
@@ -216,7 +220,8 @@ export class ConnectionStatusService {
         total: 0,
         pending: 0,
         accepted: 0,
-        rejected: 0
+        rejected: 0,
+        cancelled: 0
       };
     }
   }
