@@ -7,9 +7,12 @@ const router = express.Router();
 
 // Apply authentication middleware to all admin routes
 router.use(authenticate);
+router.use(authorize(["admin"]));
 
-// Remove admin authorization - allow any authenticated user to access admin endpoints
-// router.use(authorize(["admin"]));
+// User management (specific paths before generic /users if extended later)
+router.get("/users/terminated", adminController.getTerminatedUsers.bind(adminController));
+router.post("/users/:userId/terminate", adminController.terminateUserAccount.bind(adminController));
+router.post("/users/:userId/reinstate", adminController.reinstateUserAccount.bind(adminController));
 
 // Dashboard routes
 router.get("/dashboard/stats", adminController.getDashboardStats.bind(adminController));

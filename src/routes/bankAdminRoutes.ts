@@ -16,6 +16,18 @@ router.get("/escrow/held-by-landlord", (req, res, next) =>
   bankAdminController.getHeldLandlordBreakdown(req, res, next),
 );
 
+router.get("/insurance-payouts", (req, res, next) =>
+  bankAdminController.listInsurancePartnerPayouts(req, res, next),
+);
+
+router.get("/insurance-payouts/:payoutId", (req, res, next) =>
+  bankAdminController.getInsurancePartnerPayout(req, res, next),
+);
+
+router.post("/insurance-payouts/:payoutId/mark-paid", (req, res, next) =>
+  bankAdminController.markInsurancePartnerPayoutPaid(req, res, next),
+);
+
 router.get("/payouts", (req, res, next) =>
   bankAdminController.listLandlordPayouts(req, res, next),
 );

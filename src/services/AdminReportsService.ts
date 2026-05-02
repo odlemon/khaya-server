@@ -5,6 +5,7 @@ import { Agreement } from "../models/Agreement";
 import { Rental } from "../models/Rental";
 import { Payment } from "../models/Payment";
 import { ServiceBooking } from "../models/ServiceBooking";
+import { NOT_ADMIN_TERMINATED } from "../constants/userQueries";
 
 export class AdminReportsService {
   async getOverview(startDate?: Date, endDate?: Date) {
@@ -25,9 +26,9 @@ export class AdminReportsService {
       totalPayments,
       totalServices
     ] = await Promise.all([
-      User.countDocuments(rangeFilter || {}),
-      User.countDocuments({ role: "landlord", ...(rangeFilter || {}) }),
-      User.countDocuments({ role: "tenant", ...(rangeFilter || {}) }),
+      User.countDocuments({ ...(rangeFilter || {}), ...NOT_ADMIN_TERMINATED }),
+      User.countDocuments({ role: "landlord", ...(rangeFilter || {}), ...NOT_ADMIN_TERMINATED }),
+      User.countDocuments({ role: "tenant", ...(rangeFilter || {}), ...NOT_ADMIN_TERMINATED }),
       Property.countDocuments(rangeFilter || {}),
       // connections optional (model name Connection in codebase)
       (await import("../models/Connection")).Connection.countDocuments(rangeFilter || {}),
@@ -55,7 +56,11 @@ export class AdminReportsService {
     const end = endDate || new Date();
     const start = startDate || new Date(new Date(end).setMonth(end.getMonth() - 5));
 
-    const dateMatch = { $match: { createdAt: { $gte: start, $lte: end } } } as any;
+    const dateMatch = {
+      $match: {
+        $and: [{ createdAt: { $gte: start, $lte: end } }, NOT_ADMIN_TERMINATED],
+      },
+    } as any;
 
     const dateProject = {
       $project: {
@@ -102,7 +107,7 @@ export class AdminReportsService {
       }
     ];
 
-    const recentUsers = await User.find({})
+    const recentUsers = await User.find({ ...NOT_ADMIN_TERMINATED })
       .sort({ createdAt: -1 })
       .limit(10)
       .select("firstName lastName email role createdAt");

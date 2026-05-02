@@ -5,6 +5,7 @@ import { User } from "../models/User";
 import { Property } from "../models/Property";
 import { Types } from "mongoose";
 import { chatService } from "../services/ChatService";
+import { emailNotificationService } from "../services/EmailNotificationService";
 
 export class ConnectionController {
 
@@ -133,6 +134,7 @@ export class ConnectionController {
         inactiveConnection.createdAt = new Date();
         inactiveConnection.respondedAt = null;
         inactiveConnection.responseMessage = null;
+        inactiveConnection.respondedBy = undefined;
         Object.assign(inactiveConnection, tenantDetails);
         await inactiveConnection.save();
         connection = inactiveConnection;
@@ -393,7 +395,8 @@ export class ConnectionController {
         success: true,
         data: {
           status: connection.status,
-          canChat: connection.status === "accepted",
+          canChat: connection.status === "accepted" && connection.isActive,
+          isActive: connection.isActive,
           requestId: connection._id,
           message: connection.message,
           responseMessage: connection.responseMessage,
@@ -426,10 +429,11 @@ export class ConnectionController {
         });
       }
 
-      const [pending, accepted, rejected, total] = await Promise.all([
+      const [pending, accepted, rejected, cancelled, total] = await Promise.all([
         Connection.countDocuments({ ...query, status: "pending" }),
         Connection.countDocuments({ ...query, status: "accepted" }),
         Connection.countDocuments({ ...query, status: "rejected" }),
+        Connection.countDocuments({ ...query, status: "cancelled" }),
         Connection.countDocuments(query)
       ]);
 
@@ -439,6 +443,7 @@ export class ConnectionController {
           pending,
           accepted,
           rejected,
+          cancelled,
           total,
           acceptanceRate: total > 0 ? Math.round((accepted / total) * 100) : 0
         }
@@ -449,13 +454,14 @@ export class ConnectionController {
   }
 
   /**
-   * Cancel connection request (tenant only)
+   * Cancel connection request (tenant only). Sets status to `cancelled`, deactivates row
+   * so the tenant can send a new request later (same tenant/landlord/property unique key).
    */
   async cancelConnectionRequest(req: Request, res: Response, next: NextFunction) {
     try {
       const userId = (req as any).user._id;
       const userRole = (req as any).user.role;
-      const { requestId } = req.params;
+      const connectionId = req.params.requestId || req.params.connectionId;
 
       // Only tenants can cancel their connection requests
       if (userRole !== "tenant") {
@@ -465,8 +471,16 @@ export class ConnectionController {
         });
       }
 
-      // Find connection request
-      const connection = await Connection.findById(requestId);
+      if (!Types.ObjectId.isValid(connectionId)) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid connection ID"
+        });
+      }
+
+      const { cancelReason } = req.body || {};
+
+      const connection = await Connection.findById(connectionId);
       if (!connection) {
         return res.status(404).json({
           success: false,
@@ -474,15 +488,13 @@ export class ConnectionController {
         });
       }
 
-      // Check if tenant owns this connection request
-      if (connection.tenantId.toString() !== userId) {
+      if (connection.tenantId.toString() !== userId.toString()) {
         return res.status(403).json({
           success: false,
           message: "You can only cancel your own connection requests"
         });
       }
 
-      // Check if still pending
       if (connection.status !== "pending") {
         return res.status(400).json({
           success: false,
@@ -490,12 +502,50 @@ export class ConnectionController {
         });
       }
 
-      // Delete connection request
-      await Connection.findByIdAndDelete(requestId);
+      const tenant = await User.findById(userId).select("firstName lastName email");
+      const landlord = await User.findById(connection.landlordId).select("firstName lastName email");
+      const property = await Property.findById(connection.propertyId).select("title");
+
+      connection.status = "cancelled";
+      connection.isActive = false;
+      connection.responseMessage =
+        typeof cancelReason === "string" && cancelReason.trim()
+          ? cancelReason.trim().slice(0, 500)
+          : "Cancelled by tenant";
+      connection.respondedAt = new Date();
+      connection.respondedBy = userId;
+      await connection.save();
+
+      await connection.populate([
+        { path: "tenantId", select: "firstName lastName email isVerified profile" },
+        { path: "landlordId", select: "firstName lastName email" },
+        { path: "propertyId", select: "title address images" }
+      ]);
+
+      if (landlord?.email) {
+        const tenantName = tenant
+          ? `${tenant.firstName || ""} ${tenant.lastName || ""}`.trim() || "A tenant"
+          : "A tenant";
+        const landlordName =
+          `${landlord.firstName || ""} ${landlord.lastName || ""}`.trim() || "Landlord";
+        try {
+          await emailNotificationService.sendTenantCancelledConnectionRequest({
+            landlordEmail: landlord.email,
+            landlordName,
+            tenantName,
+            propertyTitle: property?.title || "Your listing",
+            cancelReason:
+              typeof cancelReason === "string" && cancelReason.trim() ? cancelReason.trim() : undefined
+          });
+        } catch (emailErr) {
+          console.error("Landlord notify (connection cancelled):", emailErr?.message || emailErr);
+        }
+      }
 
       res.status(200).json({
         success: true,
-        message: "Connection request cancelled successfully"
+        message: "Connection request cancelled successfully",
+        data: connection
       });
     } catch (error: any) {
       next(error);

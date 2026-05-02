@@ -793,6 +793,43 @@ export class EmailNotificationService {
       </html>
     `;
   }
+
+  /**
+   * Notify landlord when a tenant withdraws a pending connection / rental interest request.
+   */
+  async sendTenantCancelledConnectionRequest(data: {
+    landlordEmail: string;
+    landlordName: string;
+    tenantName: string;
+    propertyTitle: string;
+    cancelReason?: string;
+  }): Promise<void> {
+    const subject = "Tenant withdrew a rental request - Khayalami";
+    const reasonBlock =
+      data.cancelReason &&
+      `<p><strong>Note from tenant:</strong> ${data.cancelReason.replace(/</g, "&lt;").replace(/>/g, "&gt;")}</p>`;
+    const htmlContent = `
+      <!DOCTYPE html>
+      <html>
+      <head><meta charset="UTF-8"></head>
+      <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+        <p>Hello <strong>${data.landlordName}</strong>,</p>
+        <p><strong>${data.tenantName}</strong> has cancelled their pending request for <strong>${data.propertyTitle}</strong>.</p>
+        ${reasonBlock || ""}
+        <p>You do not need to take action. If they are still interested, they may send a new request later.</p>
+        <p style="color:#666;font-size:14px;">This is an automated message from Khayalami.</p>
+      </body>
+      </html>
+    `;
+    const from = getFromAddress("notifications");
+
+    await emailTransport.sendMail({
+      from: `${from.name} <${from.address}>`,
+      to: `${data.landlordName} <${data.landlordEmail}>`,
+      subject,
+      html: htmlContent
+    });
+  }
 }
 
 export const emailNotificationService = new EmailNotificationService();

@@ -4,12 +4,17 @@ import { User } from "../models/User";
 import { Types } from "mongoose";
 import { Agreement } from "../models/Agreement";
 import { Rental } from "../models/Rental";
+import { NOT_ADMIN_TERMINATED } from "../constants/userQueries";
 
 export class UserController {
 
   async getUsers(req: Request, res: Response, next: NextFunction) {
     try {
-      const users = await User.find({}).select("-password");
+      const users = await User.find({
+        ...NOT_ADMIN_TERMINATED,
+      })
+        .select("-password")
+        .sort({ createdAt: -1 });
       res.status(200).json({ success: true, data: users });
     } catch (error: any) {
       next(error);
@@ -270,10 +275,10 @@ export class UserController {
         });
       }
 
-      // Build query for tenants
-      const query: any = { 
+      const query: any = {
         role: "tenant",
-        isActive: true 
+        isActive: true,
+        ...NOT_ADMIN_TERMINATED,
       };
 
       // Filter by verification status

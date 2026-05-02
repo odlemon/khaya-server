@@ -1,5 +1,6 @@
 // @ts-nocheck
 import { User } from "../models/User";
+import { NOT_ADMIN_TERMINATED } from "../constants/userQueries";
 import { Types } from "mongoose";
 
 export interface DocumentUploadData {
@@ -175,7 +176,7 @@ export class DocumentVerificationService {
   static async getPendingVerifications(): Promise<any[]> {
     try {
       const users = await User.find({
-        "documentVerification.status": "pending"
+        $and: [{ "documentVerification.status": "pending" }, NOT_ADMIN_TERMINATED],
       }).select("firstName lastName email role documentVerification createdAt");
 
       return users.map(user => ({
@@ -199,7 +200,10 @@ export class DocumentVerificationService {
   static async getAllVerifications(): Promise<any[]> {
     try {
       const users = await User.find({
-        "documentVerification.status": { $in: ["pending", "verified", "rejected"] }
+        $and: [
+          { "documentVerification.status": { $in: ["pending", "verified", "rejected"] } },
+          NOT_ADMIN_TERMINATED,
+        ],
       })
       .select("firstName lastName email role documentVerification createdAt")
       .populate("documentVerification.verifiedBy", "firstName lastName")

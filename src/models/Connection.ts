@@ -5,7 +5,7 @@ export interface IConnection extends Document {
   tenantId: mongoose.Types.ObjectId;
   landlordId: mongoose.Types.ObjectId;
   propertyId: mongoose.Types.ObjectId;
-  status: "pending" | "accepted" | "rejected";
+  status: "pending" | "accepted" | "rejected" | "cancelled";
   message: string;
   expectedMoveInDate?: Date;
   /**
@@ -46,7 +46,7 @@ const connectionSchema = new Schema<IConnection>({
   },
   status: { 
     type: String, 
-    enum: ["pending", "accepted", "rejected"], 
+    enum: ["pending", "accepted", "rejected", "cancelled"],
     default: "pending" 
   },
   message: { 

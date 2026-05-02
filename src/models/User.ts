@@ -111,6 +111,14 @@ export interface IUser extends Document {
   };
   googleId?: string;
   registrationMethod?: "google" | "email";
+  /** Set when Khayalami admin terminates a tenant/landlord account (soft). */
+  adminTerminatedAt?: Date | null;
+  adminTerminationReason?: string | null;
+  adminTerminatedBy?: mongoose.Types.ObjectId | null;
+  /** Last admin reinstatement (reverse termination) audit. */
+  adminReinstatedAt?: Date | null;
+  adminReinstatementReason?: string | null;
+  adminReinstatedBy?: mongoose.Types.ObjectId | null;
   comparePassword(candidatePassword: string): Promise<boolean>;
 }
 
@@ -232,9 +240,18 @@ const userSchema = new Schema<IUser>(
     },
     googleId: { type: String, default: null },
     registrationMethod: { type: String, enum: ["google", "email"], default: "email" },
+    adminTerminatedAt: { type: Date, default: null },
+    adminTerminationReason: { type: String, maxlength: 2000, default: null },
+    adminTerminatedBy: { type: Schema.Types.ObjectId, ref: "User", default: null },
+    adminReinstatedAt: { type: Date, default: null },
+    adminReinstatementReason: { type: String, maxlength: 2000, default: null },
+    adminReinstatedBy: { type: Schema.Types.ObjectId, ref: "User", default: null },
   },
   { timestamps: true }
 );
+
+userSchema.index({ adminTerminatedAt: 1 });
+userSchema.index({ adminReinstatedAt: 1 });
 
 userSchema.pre("save", async function (next) {
   if (!this.isModified("password")) return next();

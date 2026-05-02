@@ -35,6 +35,12 @@ router.put("/:connectionId/reject",
   (req, res, next) => connectionController.rejectConnection(req, res, next)
 );
 
+// Cancel pending connection request (tenant only) — sets status to `cancelled`, notifies landlord
+router.put("/:connectionId/cancel-request",
+  authorize(["tenant"]),
+  (req, res, next) => connectionController.cancelConnectionRequest(req, res, next)
+);
+
 // Cancel/Deactivate connection (landlord only)
 router.put("/:connectionId/cancel", 
   (req, res, next) => connectionController.cancelLandlordConnection(req, res, next)

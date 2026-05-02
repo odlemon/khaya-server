@@ -570,45 +570,60 @@ export class EscrowService {
     // Remove insurance from Khayalami total (insurance goes to insurance partner, not Khayalami)
     const khayalamiNet = totalKhayalamiAmount - totalInsuranceAmount;
 
-    // Create insurance partner payout (if any insurance premiums collected)
+    // Insurance partner payout (premiums aggregated for external remittance — bank portal marks paid)
+    let insurancePayoutDoc: InstanceType<typeof Payout> | null = null;
     if (totalInsuranceAmount > 0) {
-      const insurancePayout = await Payout.create({
-        payoutType: "khayalami",
-        recipientType: "khayalami",
+      insurancePayoutDoc = await Payout.create({
+        payoutType: "insurance_partner",
+        recipientType: "insurance_partner",
         amount: totalInsuranceAmount,
-        escrowTransactionIds: heldTransactions.filter(t => (t.deductions?.insurancePremium || 0) > 0).map(t => t._id),
+        escrowTransactionIds: heldTransactions
+          .filter((t) => (t.deductions?.insurancePremium || 0) > 0)
+          .map((t) => t._id),
         payoutMethod: "internal_transfer",
         status: "pending",
         distributionBatchId: new Types.ObjectId(),
-        notes: `Insurance premium distribution - ${heldTransactions.length} transaction(s). To be remitted to insurance partner.`
+        notes: `Insurance premium distribution - ${heldTransactions.length} transaction(s). To be remitted to insurance partner.`,
       });
-      payoutIds.push(insurancePayout._id.toString());
+      payoutIds.push(insurancePayoutDoc._id.toString());
       console.log(`🛡️  Insurance partner payout created: K${totalInsuranceAmount}`);
     }
 
-    // Create Khayalami payout (platform commissions, excluding insurance premiums)
+    // Khayalami platform commission (excludes insurance premiums)
+    let khayalamiPayoutDoc: InstanceType<typeof Payout> | null = null;
     if (khayalamiNet > 0) {
-      const khayalamiPayout = await Payout.create({
+      khayalamiPayoutDoc = await Payout.create({
         payoutType: "khayalami",
         recipientType: "khayalami",
         amount: khayalamiNet,
-        escrowTransactionIds: heldTransactions.map(t => t._id),
+        escrowTransactionIds: heldTransactions.map((t) => t._id),
         payoutMethod: "internal_transfer",
         status: "pending",
         distributionBatchId: new Types.ObjectId(),
-        notes: `Monthly commission distribution - ${heldTransactions.length} transaction(s) (insurance premiums excluded)`
+        notes: `Monthly commission distribution - ${heldTransactions.length} transaction(s) (insurance premiums excluded)`,
       });
 
-      payoutIds.push(khayalamiPayout._id.toString());
+      payoutIds.push(khayalamiPayoutDoc._id.toString());
     }
 
-    // Mark all held transactions as distributed
+    // Mark held transactions distributed; link payout rows for bank settlement tracking
     for (const transaction of heldTransactions) {
-      transaction.khayalamiPayoutStatus = "pending";
       transaction.status = "distributed";
       transaction.distributedAt = new Date();
       transaction.distributedBy = new Types.ObjectId(distributedBy);
       transaction.distributionMethod = method;
+
+      if (
+        insurancePayoutDoc &&
+        (transaction.deductions?.insurancePremium || 0) > 0
+      ) {
+        transaction.insurancePartnerPayoutId = insurancePayoutDoc._id;
+        transaction.insurancePartnerPayoutStatus = "pending";
+      }
+      if (khayalamiPayoutDoc) {
+        transaction.khayalamiPayoutId = khayalamiPayoutDoc._id;
+        transaction.khayalamiPayoutStatus = "pending";
+      }
       await transaction.save();
     }
 

@@ -6,6 +6,7 @@ import { Connection } from "../models/Connection";
 import { Chat } from "../models/Chat";
 import { Agreement } from "../models/Agreement";
 import { Types } from "mongoose";
+import { NOT_ADMIN_TERMINATED } from "../constants/userQueries";
 
 export class AdminController {
   /**
@@ -14,8 +15,16 @@ export class AdminController {
   async getDashboardStats(req: Request, res: Response, next: NextFunction) {
     try {
       // Get total counts
-      const totalTenants = await User.countDocuments({ role: "tenant", isActive: true });
-      const totalLandlords = await User.countDocuments({ role: "landlord", isActive: true });
+      const totalTenants = await User.countDocuments({
+        role: "tenant",
+        isActive: true,
+        ...NOT_ADMIN_TERMINATED,
+      });
+      const totalLandlords = await User.countDocuments({
+        role: "landlord",
+        isActive: true,
+        ...NOT_ADMIN_TERMINATED,
+      });
       const totalProperties = await Property.countDocuments({ isActive: true });
       const totalConnections = await Connection.countDocuments({ isActive: true });
       const totalChats = await Chat.countDocuments({ isActive: true });
@@ -33,12 +42,14 @@ export class AdminController {
 
       const recentTenants = await User.countDocuments({
         role: "tenant",
-        createdAt: { $gte: thirtyDaysAgo }
+        createdAt: { $gte: thirtyDaysAgo },
+        ...NOT_ADMIN_TERMINATED,
       });
 
       const recentLandlords = await User.countDocuments({
-        role: "landlord", 
-        createdAt: { $gte: thirtyDaysAgo }
+        role: "landlord",
+        createdAt: { $gte: thirtyDaysAgo },
+        ...NOT_ADMIN_TERMINATED,
       });
 
       const recentProperties = await Property.countDocuments({
@@ -94,11 +105,13 @@ export class AdminController {
       const [tenants, landlords, properties, connections] = await Promise.all([
         User.countDocuments({
           role: "tenant",
-          createdAt: { $gte: monthStart, $lte: monthEnd }
+          createdAt: { $gte: monthStart, $lte: monthEnd },
+          ...NOT_ADMIN_TERMINATED,
         }),
         User.countDocuments({
           role: "landlord",
-          createdAt: { $gte: monthStart, $lte: monthEnd }
+          createdAt: { $gte: monthStart, $lte: monthEnd },
+          ...NOT_ADMIN_TERMINATED,
         }),
         Property.countDocuments({
           createdAt: { $gte: monthStart, $lte: monthEnd }
@@ -133,16 +146,17 @@ export class AdminController {
 
       const skip = (page - 1) * limit;
 
-      // Build filter
-      const filter: any = {};
-      if (role) filter.role = role;
-      if (isActive !== undefined) filter.isActive = isActive === 'true';
+      const filter: any = { $and: [NOT_ADMIN_TERMINATED] };
+      if (role) filter.$and.push({ role });
+      if (isActive !== undefined) filter.$and.push({ isActive: isActive === "true" });
       if (search) {
-        filter.$or = [
-          { firstName: { $regex: search, $options: 'i' } },
-          { lastName: { $regex: search, $options: 'i' } },
-          { email: { $regex: search, $options: 'i' } }
-        ];
+        filter.$and.push({
+          $or: [
+            { firstName: { $regex: search, $options: "i" } },
+            { lastName: { $regex: search, $options: "i" } },
+            { email: { $regex: search, $options: "i" } },
+          ],
+        });
       }
 
       const [users, total] = await Promise.all([
@@ -166,6 +180,201 @@ export class AdminController {
             pages: Math.ceil(total / limit)
           }
         }
+      });
+    } catch (error: any) {
+      next(error);
+    }
+  }
+
+  /**
+   * List accounts terminated by Khayalami admin (tenant/landlord only in data).
+   */
+  async getTerminatedUsers(req: Request, res: Response, next: NextFunction) {
+    try {
+      const page = parseInt(req.query.page as string, 10) || 1;
+      const limit = Math.min(parseInt(req.query.limit as string, 10) || 20, 100);
+      const role = req.query.role as string;
+      const skip = (page - 1) * limit;
+
+      const filter: any = {
+        adminTerminatedAt: { $ne: null, $exists: true },
+      };
+      if (role && ["tenant", "landlord"].includes(role)) {
+        filter.role = role;
+      }
+
+      const [users, total] = await Promise.all([
+        User.find(filter)
+          .select("-password")
+          .populate("adminTerminatedBy", "firstName lastName email role")
+          .sort({ adminTerminatedAt: -1 })
+          .skip(skip)
+          .limit(limit),
+        User.countDocuments(filter),
+      ]);
+
+      res.status(200).json({
+        success: true,
+        message: "Terminated accounts retrieved successfully",
+        data: {
+          users,
+          pagination: {
+            page,
+            limit,
+            total,
+            pages: Math.ceil(total / limit) || 0,
+          },
+        },
+      });
+    } catch (error: any) {
+      next(error);
+    }
+  }
+
+  /**
+   * Terminate a tenant or landlord account (soft). User cannot log in; row kept.
+   */
+  async terminateUserAccount(req: Request, res: Response, next: NextFunction) {
+    try {
+      const adminId = (req as any).user._id;
+      const { userId } = req.params;
+      const { reason } = req.body || {};
+
+      if (!Types.ObjectId.isValid(userId)) {
+        return res.status(400).json({ success: false, message: "Invalid user ID" });
+      }
+      if (typeof reason !== "string" || !reason.trim()) {
+        return res.status(400).json({
+          success: false,
+          message: "Termination reason is required (non-empty string).",
+        });
+      }
+      const trimmedReason = reason.trim();
+      if (trimmedReason.length > 2000) {
+        return res.status(400).json({
+          success: false,
+          message: "Reason must be at most 2000 characters.",
+        });
+      }
+
+      if (adminId.toString() === userId) {
+        return res.status(400).json({
+          success: false,
+          message: "You cannot terminate your own account.",
+        });
+      }
+
+      const user = await User.findById(userId);
+      if (!user) {
+        return res.status(404).json({ success: false, message: "User not found" });
+      }
+
+      if (!["tenant", "landlord"].includes(user.role)) {
+        return res.status(403).json({
+          success: false,
+          message: "Only tenant or landlord accounts can be terminated with this action.",
+        });
+      }
+
+      if (user.adminTerminatedAt) {
+        return res.status(409).json({
+          success: false,
+          message: "This account is already terminated.",
+        });
+      }
+
+      user.adminTerminatedAt = new Date();
+      user.adminTerminationReason = trimmedReason;
+      user.adminTerminatedBy = adminId;
+      user.isActive = false;
+      user.adminReinstatedAt = null;
+      user.adminReinstatementReason = null;
+      user.adminReinstatedBy = null;
+      await user.save();
+
+      const updated = await User.findById(userId)
+        .select("-password")
+        .populate("adminTerminatedBy", "firstName lastName email role");
+
+      res.status(200).json({
+        success: true,
+        message: "Account terminated successfully",
+        data: updated,
+      });
+    } catch (error: any) {
+      next(error);
+    }
+  }
+
+  /**
+   * Reverse admin termination: clear termination flags, reactivate account, store reinstatement reason.
+   */
+  async reinstateUserAccount(req: Request, res: Response, next: NextFunction) {
+    try {
+      const adminId = (req as any).user._id;
+      const { userId } = req.params;
+      const { reason } = req.body || {};
+
+      if (!Types.ObjectId.isValid(userId)) {
+        return res.status(400).json({ success: false, message: "Invalid user ID" });
+      }
+      if (typeof reason !== "string" || !reason.trim()) {
+        return res.status(400).json({
+          success: false,
+          message: "Reinstatement reason is required (non-empty string).",
+        });
+      }
+      const trimmedReason = reason.trim();
+      if (trimmedReason.length > 2000) {
+        return res.status(400).json({
+          success: false,
+          message: "Reason must be at most 2000 characters.",
+        });
+      }
+
+      if (adminId.toString() === userId) {
+        return res.status(400).json({
+          success: false,
+          message: "You cannot reinstate your own account with this action.",
+        });
+      }
+
+      const user = await User.findById(userId);
+      if (!user) {
+        return res.status(404).json({ success: false, message: "User not found" });
+      }
+
+      if (!["tenant", "landlord"].includes(user.role)) {
+        return res.status(403).json({
+          success: false,
+          message: "Only tenant or landlord accounts can be reinstated with this action.",
+        });
+      }
+
+      if (!user.adminTerminatedAt) {
+        return res.status(409).json({
+          success: false,
+          message: "This account is not terminated.",
+        });
+      }
+
+      user.adminTerminatedAt = null;
+      user.adminTerminationReason = null;
+      user.adminTerminatedBy = null;
+      user.adminReinstatedAt = new Date();
+      user.adminReinstatementReason = trimmedReason;
+      user.adminReinstatedBy = adminId;
+      user.isActive = true;
+      await user.save();
+
+      const updated = await User.findById(userId)
+        .select("-password")
+        .populate("adminReinstatedBy", "firstName lastName email role");
+
+      res.status(200).json({
+        success: true,
+        message: "Account reinstated successfully",
+        data: updated,
       });
     } catch (error: any) {
       next(error);
@@ -332,11 +541,16 @@ export class AdminController {
         });
       }
 
-      const user = await User.findByIdAndUpdate(
-        userId,
-        { isActive },
-        { new: true }
-      ).select('-password');
+      const updatePayload: any = { isActive };
+      if (isActive === true) {
+        updatePayload.adminTerminatedAt = null;
+        updatePayload.adminTerminationReason = null;
+        updatePayload.adminTerminatedBy = null;
+      }
+
+      const user = await User.findByIdAndUpdate(userId, updatePayload, { new: true }).select(
+        "-password"
+      );
 
       if (!user) {
         return res.status(404).json({
@@ -453,8 +667,8 @@ export class AdminController {
       const userGrowth = await User.aggregate([
         {
           $match: {
-            createdAt: { $gte: startDate }
-          }
+            $and: [{ createdAt: { $gte: startDate } }, NOT_ADMIN_TERMINATED],
+          },
         },
         {
           $group: {

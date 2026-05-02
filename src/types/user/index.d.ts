@@ -8,6 +8,12 @@ export interface User {
   role: UserRole
   isVerified: boolean
   isActive: boolean
+  adminTerminatedAt?: Date | null
+  adminTerminationReason?: string | null
+  adminTerminatedBy?: string | null
+  adminReinstatedAt?: Date | null
+  adminReinstatementReason?: string | null
+  adminReinstatedBy?: string | null
   profile?: {
     avatar?: string
     bio?: string

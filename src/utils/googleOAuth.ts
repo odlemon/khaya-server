@@ -4,6 +4,14 @@ import { Strategy as GoogleStrategy } from "passport-google-oauth20";
 import { User } from "../models/User";
 import crypto from "crypto";
 
+function rejectIfAdminTerminated(user: any, done: (e: Error | null, u?: false) => void): boolean {
+  if (user?.adminTerminatedAt) {
+    done(new Error("Account disabled"));
+    return true;
+  }
+  return false;
+}
+
 passport.use(new GoogleStrategy({
   clientID: "720698635389-0ckrr5nqc79mikfl1i482idd8nv00jrb.apps.googleusercontent.com",
   clientSecret: "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",
@@ -12,6 +20,7 @@ passport.use(new GoogleStrategy({
   try {
     let user = await User.findOne({ googleId: profile.id });
     if (user) {
+      if (rejectIfAdminTerminated(user, done)) return;
       return done(null, user); // Existing user, login
     }
     // If not found by googleId, check if email exists (user may have registered with email before)
@@ -19,6 +28,7 @@ passport.use(new GoogleStrategy({
     if (!email) return done(new Error("No email found in Google profile"));
     user = await User.findOne({ email });
     if (user) {
+      if (rejectIfAdminTerminated(user, done)) return;
       // Optionally, link Google account to existing user
       user.googleId = profile.id;
       user.registrationMethod = "google";

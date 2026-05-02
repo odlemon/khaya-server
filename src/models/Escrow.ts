@@ -47,6 +47,11 @@ export interface IEscrowTransaction extends Document {
   khayalamiPayoutId?: mongoose.Types.ObjectId; // Reference to payout record
   khayalamiPayoutStatus?: "pending" | "paid" | "failed";
   khayalamiPayoutDate?: Date;
+
+  /** Insurance partner remittance (premium slice) — bank settles outside platform */
+  insurancePartnerPayoutId?: mongoose.Types.ObjectId;
+  insurancePartnerPayoutStatus?: "pending" | "paid" | "failed";
+  insurancePartnerPayoutDate?: Date;
   
   // Payment verification (for cash payments)
   verifiedAt?: Date;
@@ -187,6 +192,18 @@ const escrowTransactionSchema = new Schema<IEscrowTransaction>({
   khayalamiPayoutDate: {
     type: Date
   },
+
+  insurancePartnerPayoutId: {
+    type: Schema.Types.ObjectId,
+    ref: "Payout"
+  },
+  insurancePartnerPayoutStatus: {
+    type: String,
+    enum: ["pending", "paid", "failed"]
+  },
+  insurancePartnerPayoutDate: {
+    type: Date
+  },
   
   // Payment verification
   verifiedAt: {
@@ -223,6 +240,8 @@ escrowTransactionSchema.index({ rentalId: 1 });
 escrowTransactionSchema.index({ distributedAt: 1 });
 escrowTransactionSchema.index({ landlordPayoutStatus: 1 });
 escrowTransactionSchema.index({ khayalamiPayoutStatus: 1 });
+escrowTransactionSchema.index({ insurancePartnerPayoutStatus: 1 });
+escrowTransactionSchema.index({ insurancePartnerPayoutId: 1 });
 // Note: agreementId and landlordId are part of compound indexes above, so no separate indexes needed
 
 export const EscrowTransaction: Model<IEscrowTransaction> = mongoose.model<IEscrowTransaction>(
@@ -358,11 +377,11 @@ export const EscrowAccount: Model<IEscrowAccount> = mongoose.model<IEscrowAccoun
 
 export interface IPayout extends Document {
   // Payout identification
-  payoutType: "landlord" | "khayalami" | "bulk_landlord" | "bulk_khayalami";
+  payoutType: "landlord" | "khayalami" | "bulk_landlord" | "bulk_khayalami" | "insurance_partner";
   
   // Recipient
   recipientId?: mongoose.Types.ObjectId; // Landlord ID (if landlord payout)
-  recipientType: "landlord" | "khayalami";
+  recipientType: "landlord" | "khayalami" | "insurance_partner";
   
   // Amount
   amount: number;
@@ -410,7 +429,7 @@ export interface IPayout extends Document {
 const payoutSchema = new Schema<IPayout>({
   payoutType: {
     type: String,
-    enum: ["landlord", "khayalami", "bulk_landlord", "bulk_khayalami"],
+    enum: ["landlord", "khayalami", "bulk_landlord", "bulk_khayalami", "insurance_partner"],
     required: true
   },
   
@@ -420,7 +439,7 @@ const payoutSchema = new Schema<IPayout>({
   },
   recipientType: {
     type: String,
-    enum: ["landlord", "khayalami"],
+    enum: ["landlord", "khayalami", "insurance_partner"],
     required: true
   },
   
