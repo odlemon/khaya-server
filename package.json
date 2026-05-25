@@ -9,6 +9,7 @@
     "seed:admin": "ts-node src/scripts/seedAdmin.ts",
     "seed:portal-admins": "ts-node src/scripts/seedPortalAdmins.ts",
     "seed:insurance-settlement": "ts-node src/scripts/seedInsuranceSettlementDemo.ts",
+    "wipe:keep-users": "ts-node src/scripts/wipeAllDataExceptUsers.ts",
     "reset:admin": "ts-node src/scripts/resetAdminPassword.ts",
     "lint": "eslint . --ext .ts",
     "format": "prettier --write 'src/**/*.ts'",
