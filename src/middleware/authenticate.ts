@@ -3,34 +3,73 @@
 import { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
 import { User, IUser } from "../models/User";
-
-const JWT_SECRET = process.env.JWT_SECRET || "your_jwt_secret_here";
+import { JWT_SECRET, JWT_EXPIRES_IN } from "../config/jwtConfig";
+import { logger } from "../utils/logger";
 
 export interface AuthRequest extends Request {
   user?: IUser;
 }
 
 export function createToken(userId: string): string {
-  return jwt.sign(
-    { userId }, 
-    JWT_SECRET, 
-    { expiresIn: "7d" } // 7 days expiration
-  );
+  return jwt.sign({ userId }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
+}
+
+function extractBearerToken(authHeader: string | undefined): string | null {
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    return null;
+  }
+  const token = authHeader.slice(7).trim();
+  return token || null;
 }
 
 export async function authenticate(req: AuthRequest, res: Response, next: NextFunction) {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith("Bearer ")) {
-    // Instead of returning a response, call next with an error
-    return next(new Error("Authorization token missing or malformed"));
+  const token = extractBearerToken(req.headers.authorization);
+
+  if (!token) {
+    return res.status(401).json({
+      success: false,
+      message: "Authorization token missing or malformed",
+      code: "AUTH_MISSING",
+    });
   }
 
-  const token = authHeader.split(" ")[1]; 
+  let decoded: { userId: string };
 
   try {
-    const decoded = jwt.verify(token, JWT_SECRET) as { userId: string };
-    const user = await User.findById(decoded.userId);
-    if (!user) return next(new Error("User not found"));
+    decoded = jwt.verify(token, JWT_SECRET) as { userId: string };
+  } catch (err: any) {
+    if (err instanceof jwt.TokenExpiredError) {
+      return res.status(401).json({
+        success: false,
+        message: "Token has expired",
+        code: "TOKEN_EXPIRED",
+      });
+    }
+    if (err instanceof jwt.JsonWebTokenError) {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid token",
+        code: "TOKEN_INVALID",
+      });
+    }
+    return res.status(401).json({
+      success: false,
+      message: "Invalid token",
+      code: "TOKEN_INVALID",
+    });
+  }
+
+  try {
+    const user = await User.findById(decoded.userId).maxTimeMS(15000);
+
+    if (!user) {
+      return res.status(401).json({
+        success: false,
+        message: "User not found",
+        code: "USER_NOT_FOUND",
+      });
+    }
+
     if (user.adminTerminatedAt) {
       return res.status(403).json({
         success: false,
@@ -38,39 +77,43 @@ export async function authenticate(req: AuthRequest, res: Response, next: NextFu
         code: "ACCOUNT_ADMIN_TERMINATED",
       });
     }
+
     req.user = user;
     next();
-  } catch (err) {
-    // Check if error is due to token expiration
-    if (err instanceof jwt.TokenExpiredError) {
-      return next(new Error("Token has expired"));
-    }
-    return next(new Error("Invalid or expired token"));
+  } catch (err: any) {
+    logger.error("Auth DB lookup failed (token may still be valid)", {
+      userId: decoded.userId,
+      error: err.message,
+      path: req.path,
+    });
+
+    return res.status(503).json({
+      success: false,
+      message: "Database temporarily unavailable. Please retry.",
+      code: "DB_UNAVAILABLE",
+    });
   }
 }
 
 export async function authenticateOptional(req: AuthRequest, res: Response, next: NextFunction) {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith("Bearer ")) {
-    // No token provided, continue without authentication
+  const token = extractBearerToken(req.headers.authorization);
+
+  if (!token) {
     req.user = undefined;
     return next();
   }
 
-  const token = authHeader.split(" ")[1]; 
-
   try {
     const decoded = jwt.verify(token, JWT_SECRET) as { userId: string };
-    const user = await User.findById(decoded.userId);
+    const user = await User.findById(decoded.userId).maxTimeMS(15000);
     if (user) {
       req.user = user;
     }
-    next();
-  } catch (err) {
-    // Token is invalid, but we continue without authentication
+  } catch {
     req.user = undefined;
-    next();
   }
+
+  next();
 }
 
 export function authorize(roles: string[] | string) {

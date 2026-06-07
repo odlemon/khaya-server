@@ -21,7 +21,19 @@ export class DatabaseConnection {
         throw new Error('MONGODB_URI environment variable is not defined');
       }
       
-      await mongoose.connect(mongoUri);
+      const serverSelectionTimeoutMS = parseInt(
+        process.env.DB_SERVER_SELECTION_TIMEOUT || "10000",
+        10
+      );
+      const maxPoolSize = parseInt(process.env.DB_MAX_POOL_SIZE || "10", 10);
+
+      await mongoose.connect(mongoUri, {
+        serverSelectionTimeoutMS,
+        socketTimeoutMS: 45000,
+        maxPoolSize,
+        heartbeatFrequencyMS: 10000,
+        retryWrites: true,
+      });
       
       console.log('✅ Connected to MongoDB successfully');
       

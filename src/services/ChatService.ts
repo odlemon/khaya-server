@@ -5,6 +5,13 @@ import { Property } from "../models/Property";
 import { Types } from "mongoose";
 import { Connection } from "../models/Connection";
 import { parseMessageMentions } from "../utils/messageParser";
+import { chatNotificationService } from "./ChatNotificationService";
+import { getActiveAdminUserIds } from "../utils/adminRecipients";
+import { resolveTaggedRecipientUserIds } from "../utils/taggedMessageRecipients";
+import {
+  isMessageReadByUser,
+  unreadMessagesFilterForUser,
+} from "../utils/messageReadStatus";
 
 export interface CreateMessageData {
   chatId: string;
@@ -149,36 +156,7 @@ export class ChatService {
     // Don't await - let it run in background
     Promise.all(linkPromises).catch(() => {}); // Silently handle errors
 
-    // Compute unread counts per chat for this user (exclude user's own messages)
-    const chatIds = chats.map((c: any) => c._id);
-    if (chatIds.length === 0) {
-      return [];
-    }
-
-    const unreadAgg = await Message.aggregate([
-      {
-        $match: {
-          chatId: { $in: chatIds },
-          isRead: false,
-          senderId: { $ne: new Types.ObjectId(userId) }
-        }
-      },
-      { $group: { _id: "$chatId", count: { $sum: 1 } } }
-    ]);
-
-    const unreadMap = new Map<string, number>();
-    unreadAgg.forEach((row: any) => {
-      unreadMap.set(row._id.toString(), row.count);
-    });
-
-    // Attach unreadCount to each chat
-    const chatsWithUnread = chats.map((chat: any) => {
-      const obj = chat.toObject();
-      obj.unreadCount = unreadMap.get(chat._id.toString()) || 0;
-      return obj;
-    });
-
-    return chatsWithUnread;
+    return this.attachUnreadCounts(chats, userId);
   }
 
   /**
@@ -245,19 +223,25 @@ export class ChatService {
     let taggedUser: "landlord" | "tenant" | "admin" | null = null;
 
     const parsed = parseMessageMentions(content);
+    let privateRecipientIds: string[] = [];
+
     if (parsed.hasTag && parsed.taggedUser) {
       taggedUser = parsed.taggedUser;
-      
-      // Find the tagged user in participants
-      const currentUserId = senderId;
-      const targetUser = chat.participants.find((p: any) => p.role === parsed.taggedUser);
-      
-      if (targetUser) {
-        visibleTo = [currentUserId, targetUser._id.toString()];
-        console.log(`${senderRole} tagged ${parsed.taggedUser}. Message visible to:`, visibleTo);
+      privateRecipientIds = await resolveTaggedRecipientUserIds(
+        chat.participants,
+        parsed.taggedUser,
+        senderIdStr
+      );
+
+      if (privateRecipientIds.length) {
+        visibleTo = [senderIdStr, ...privateRecipientIds];
+        console.log(
+          `${senderRole} tagged @${parsed.taggedUser}. Private to:`,
+          visibleTo
+        );
       }
     }
-    // If no tag or tag not found, visible to all (empty visibleTo array)
+    // No tag — visible to all participants (empty visibleTo)
 
     // Create message
     const message = new Message({
@@ -282,27 +266,58 @@ export class ChatService {
     };
     await chat.save();
 
-    // Send notification to recipients
-    const recipients = visibleTo.length > 0 
-      ? chat.participants.filter((p: any) => {
-          const pId = p._id?.toString?.() || p.toString();
-          return visibleTo.includes(pId) && pId !== senderIdStr;
-        })
-      : chat.participants.filter((p: any) => {
-          const pId = p._id?.toString?.() || p.toString();
-          return pId !== senderIdStr;
-        });
+    const isPrivate = visibleTo.length > 0;
+    const recipientIds = new Set<string>();
 
-    for (const recipient of recipients) {
-      const recipientId = recipient._id?.toString?.() || recipient.toString();
+    if (isPrivate) {
+      // @mention — notify ONLY the tagged party (not sender, not other participants)
+      for (const recipientId of privateRecipientIds) {
+        recipientIds.add(recipientId);
+      }
+    } else {
+      // Public — notify other participants + all admins (oversight)
+      for (const p of chat.participants) {
+        const pId = p._id?.toString?.() || p.toString();
+        if (pId !== senderIdStr) {
+          recipientIds.add(pId);
+        }
+      }
+      const adminIds = await getActiveAdminUserIds(senderIdStr);
+      for (const adminId of adminIds) {
+        recipientIds.add(adminId);
+      }
+    }
+
+    const notificationType =
+      messageType === "viewing_request"
+        ? "viewing_request"
+        : messageType === "move_in_request"
+        ? "move_in_request"
+        : "new_message";
+
+    const senderName = `${message.senderId.firstName} ${message.senderId.lastName}`.trim();
+    const notificationBody =
+      notificationType === "new_message"
+        ? isPrivate
+          ? `Private message from ${senderName}`
+          : `New message from ${senderName}`
+        : content.substring(0, 200);
+
+    recipientIds.delete(senderIdStr);
+
+    console.log(
+      `[REALTIME] notifying ${recipientIds.size} recipient(s) | chatId=${chatId} private=${isPrivate}${isPrivate && taggedUser ? ` tag=@${taggedUser}` : ""}`
+    );
+
+    for (const recipientId of recipientIds) {
       await this.sendChatNotification({
-        type: "new_message",
+        type: notificationType,
         recipientId,
         senderId: senderId,
         chatId: chatId,
         propertyId: chat.propertyId.toString(),
-        message: `New message from ${message.senderId.firstName} ${message.senderId.lastName}`,
-        data: { messageId: message._id, isPrivate: visibleTo.length > 0 }
+        message: notificationBody,
+        data: { messageId: message._id, isPrivate: visibleTo.length > 0 },
       });
     }
 
@@ -344,26 +359,6 @@ export class ChatService {
 
     await newMessage.save();
 
-    // Send notification to landlord
-    const chat = await Chat.findById(chatId);
-    const landlordId = chat.participants.find(p => p.toString() !== senderId);
-    
-    if (landlordId) {
-      await this.sendChatNotification({
-        type: "viewing_request",
-        recipientId: landlordId.toString(),
-        senderId: senderId,
-        chatId: chatId,
-        propertyId: chat.propertyId.toString(),
-        message: `New viewing request for ${preferredDate.toDateString()} at ${preferredTime}`,
-        data: { 
-          messageId: newMessage._id,
-          preferredDate,
-          preferredTime
-        }
-      });
-    }
-
     return newMessage;
   }
 
@@ -399,26 +394,6 @@ export class ChatService {
     };
 
     await newMessage.save();
-
-    // Send notification to landlord
-    const chat = await Chat.findById(chatId);
-    const landlordId = chat.participants.find(p => p.toString() !== senderId);
-    
-    if (landlordId) {
-      await this.sendChatNotification({
-        type: "move_in_request",
-        recipientId: landlordId.toString(),
-        senderId: senderId,
-        chatId: chatId,
-        propertyId: chat.propertyId.toString(),
-        message: `New move-in request for ${preferredMoveInDate.toDateString()} (${tenancyDuration} months)`,
-        data: { 
-          messageId: newMessage._id,
-          preferredMoveInDate,
-          tenancyDuration
-        }
-      });
-    }
 
     return newMessage;
   }
@@ -466,22 +441,6 @@ export class ChatService {
       content: responseContent
     });
 
-    // Send notification to tenant
-    await this.sendChatNotification({
-      type: "viewing_response",
-      recipientId: originalMessage.senderId.toString(),
-      senderId: landlordId,
-      chatId: originalMessage.chatId.toString(),
-      propertyId: (await Chat.findById(originalMessage.chatId)).propertyId.toString(),
-      message: `Viewing request ${status}`,
-      data: { 
-        messageId: originalMessage._id,
-        status,
-        acceptedDate,
-        acceptedTime
-      }
-    });
-
     return responseMessage;
   }
 
@@ -526,54 +485,54 @@ export class ChatService {
       content: responseContent
     });
 
-    // Send notification to tenant
-    await this.sendChatNotification({
-      type: "move_in_response",
-      recipientId: originalMessage.senderId.toString(),
-      senderId: landlordId,
-      chatId: originalMessage.chatId.toString(),
-      propertyId: (await Chat.findById(originalMessage.chatId)).propertyId.toString(),
-      message: `Move-in request ${status}`,
-      data: { 
-        messageId: originalMessage._id,
-        status,
-        acceptedMoveInDate,
-        acceptedDuration
-      }
-    });
-
     return responseMessage;
-  }
-
-  /**
-   * Mark messages as read
-   */
-  async markMessagesAsRead(chatId: string, userId: string): Promise<void> {
-    await Message.updateMany(
-      { 
-        chatId, 
-        senderId: { $ne: userId }, 
-        isRead: false 
-      },
-      { 
-        isRead: true, 
-        readAt: new Date() 
-      }
-    );
   }
 
   /**
    * Get unread message count for user
    */
   async getUnreadCount(userId: string): Promise<number> {
+    const chatIds = await Chat.find({ participants: userId }).distinct("_id");
+    if (!chatIds.length) {
+      return 0;
+    }
+
     const count = await Message.countDocuments({
-      senderId: { $ne: userId },
-      isRead: false,
-      chatId: {
-        $in: await Chat.find({ participants: userId }).distinct("_id")
-      }
+      chatId: { $in: chatIds },
+      ...unreadMessagesFilterForUser(userId),
     });
     return count;
+  }
+
+  /**
+   * Attach per-viewer unreadCount to a list of chats.
+   */
+  async attachUnreadCounts(chats: any[], viewerUserId: string): Promise<any[]> {
+    const chatIds = chats.map((c) => c._id);
+    if (!chatIds.length) {
+      return [];
+    }
+
+    const unreadAgg = await Message.aggregate([
+      {
+        $match: {
+          chatId: { $in: chatIds },
+          ...unreadMessagesFilterForUser(viewerUserId),
+        },
+      },
+      { $group: { _id: "$chatId", count: { $sum: 1 } } },
+    ]);
+
+    const unreadMap = new Map<string, number>();
+    unreadAgg.forEach((row: any) => {
+      unreadMap.set(row._id.toString(), row.count);
+    });
+
+    return chats.map((chat: any) => {
+      const obj = chat.toObject ? chat.toObject() : { ...chat };
+      obj.unreadCount = unreadMap.get(chat._id.toString()) || 0;
+      return obj;
+    });
   }
 
   /**
@@ -682,14 +641,11 @@ export class ChatService {
    * Send chat notification (placeholder for notification system)
    */
   private async sendChatNotification(notification: ChatNotification): Promise<void> {
-    // This would integrate with your notification system
-    // For now, we'll just log it
-    console.log("Chat Notification:", notification);
-    
-    // TODO: Integrate with push notifications, email, SMS, etc.
-    // Example integration:
-    // await notificationService.sendPushNotification(notification.recipientId, notification.message);
-    // await emailService.sendChatNotification(notification.recipientId, notification);
+    try {
+      await chatNotificationService.dispatch(notification);
+    } catch (error: any) {
+      console.error("Chat notification dispatch failed:", error.message || error);
+    }
   }
 
   /**
@@ -713,31 +669,27 @@ export class ChatService {
       messageIds = null;
     }
 
-    // Build query
+    const userOid = new Types.ObjectId(actualUserId);
+
     const query: any = {
       chatId: new Types.ObjectId(chatId),
-      senderId: { $ne: new Types.ObjectId(actualUserId) }, // Don't mark own messages as read
-      isRead: false
+      senderId: { $ne: userOid },
+      readBy: { $nin: [userOid] },
     };
 
-    // If specific messageIds provided, filter by them
     if (messageIds && messageIds.length > 0) {
-      query._id = { $in: messageIds.map(id => new Types.ObjectId(id)) };
+      query._id = { $in: messageIds.map((id) => new Types.ObjectId(id)) };
     }
 
-    const result = await Message.updateMany(
-      query,
-      {
-        $set: {
-          isRead: true,
-          readAt: new Date()
-        }
-      }
-    );
+    const result = await Message.updateMany(query, {
+      $addToSet: { readBy: userOid },
+      $set: { readAt: new Date() },
+    });
 
     return {
       modifiedCount: result.modifiedCount,
-      messageIds: messageIds
+      messageIds: messageIds || [],
+      readBy: actualUserId,
     };
   }
 
@@ -807,7 +759,11 @@ export class ChatService {
   /**
    * Get all chats (Admin only)
    */
-  async getAllChats(page: number = 1, limit: number = 50): Promise<{ chats: IChat[], total: number }> {
+  async getAllChats(
+    page: number = 1,
+    limit: number = 50,
+    viewerUserId?: string
+  ): Promise<{ chats: any[]; total: number }> {
     const skip = (page - 1) * limit;
 
     const chats = await Chat.find({ isActive: true })
@@ -819,7 +775,11 @@ export class ChatService {
 
     const total = await Chat.countDocuments({ isActive: true });
 
-    return { chats, total };
+    const chatsWithUnread = viewerUserId
+      ? await this.attachUnreadCounts(chats, viewerUserId)
+      : chats.map((c) => (c.toObject ? c.toObject() : c));
+
+    return { chats: chatsWithUnread, total };
   }
 
   /**

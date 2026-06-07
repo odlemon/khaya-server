@@ -9,12 +9,12 @@ export const emailConfig = {
     port: 587,
     auth: {
       user: "emailapikey",
-      pass: "wSsVR60l/RH4Bqx1mjyuJeg/y19XAFj/FUQujlLz6XP8HPnDpscywkDKUVCmHPgdRGNoEjoS8rJ/mR8H1DMN294lyVsCWyiF9mqRe1U4J3x17qnvhDzJWWlZkRqLJYsMxQRunGdhE8on+g=="
+      pass: "wSsVR60jq0L4Cqt4mDz/I7s7nllWU1zyQUwsiQOi7iL1TfHH98c7kE3NAQauHfNKQGNgQjEbrbt4mhcIgTFciYgon1pRDCiF9mqRe1U4J3x17qnvhDzNXWRblBKALIoMxw1onGlpGsgj+g=="
     }
   },
   
   // From Address Configuration
-  fromAddress: "noreply@kyntaro.com",
+  fromAddress: "noreply@khayalami.co.zw",
   
   // From Names
   fromNames: {

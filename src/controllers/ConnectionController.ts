@@ -6,6 +6,7 @@ import { Property } from "../models/Property";
 import { Types } from "mongoose";
 import { chatService } from "../services/ChatService";
 import { emailNotificationService } from "../services/EmailNotificationService";
+import { emitChatMessageRealtime } from "../utils/chatRealtime";
 
 export class ConnectionController {
 
@@ -642,12 +643,16 @@ export class ConnectionController {
         // Send initial message from landlord
         const initialMessage = responseMessage || "Thank you for contacting me! I'd be happy to help you with this property. How can I assist you today?";
         
-        await chatService.sendMessage({
+        const initialMsg = await chatService.sendMessage({
           chatId: chat._id.toString(),
           senderId: connection.landlordId.toString(),
           senderRole: "landlord",
           messageType: "text",
           content: initialMessage
+        });
+
+        emitChatMessageRealtime(req, chat._id.toString(), initialMsg, {
+          senderId: connection.landlordId.toString(),
         });
 
         console.log("🔍 DEBUG: Chat created and initial message sent successfully");

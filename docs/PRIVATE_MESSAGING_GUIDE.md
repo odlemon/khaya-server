@@ -138,11 +138,11 @@ Admin:           "Hello everyone, I'm monitoring this chat"
 
 1. **Message sent with @mention**
 2. **Backend parses the content** (looks for @landlord, @tenant, @admin)
-3. **Finds the tagged user** in chat participants
-4. **Sets `visibleTo`** = [sender + tagged user]
+3. **Resolves the tagged user** (participant by role, or all active admins for `@admin` if none joined yet)
+4. **Sets `visibleTo`** = [sender + tagged recipient(s)]
 5. **Saves message** with visibility restrictions
-6. **Sends notifications** only to visible users
-7. **Socket emits** only to visible users' rooms
+6. **Sends notifications only to the tagged recipient** — not the sender, not other participants, not broadcast admins on public messages
+7. **Socket emits** to tagged recipient `user:{id}` rooms + `role:admin` monitoring room (admins see live; untagged parties do not get socket or notification)
 
 ---
 
