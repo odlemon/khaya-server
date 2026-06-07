@@ -12,6 +12,8 @@ import { logger } from "./utils/logger"
 import { getServerPort } from "./utils/portFinder"
 import "./utils/googleOAuth";
 import SocketService from "./services/SocketService"
+import { setSocketService } from "./services/realtimeRegistry"
+import { getSocketCorsOrigins } from "./utils/socketCors"
 
 import connectionRoutes from "./routes/connectionRoutes"
 
@@ -21,7 +23,7 @@ const app = express()
 const server = createServer(app)
 const io = new SocketIOServer(server, {
   cors: {
-    origin: ["https://khaya-portal.vercel.app", "http://localhost:3000", "http://localhost:3001"],
+    origin: getSocketCorsOrigins(),
     credentials: true,
     methods: ["GET", "HEAD", "PUT", "PATCH", "POST", "DELETE"]
   },
@@ -102,6 +104,7 @@ import cronRoutes from "./routes/cronRoutes"
 import webhookRoutes from "./routes/webhookRoutes"
 import insuranceAdminRoutes from "./routes/insuranceAdminRoutes"
 import bankAdminRoutes from "./routes/bankAdminRoutes"
+import notificationRoutes from "./routes/notificationRoutes"
 
 app.use("/api/users", userRoutes)
 app.use("/api/auth", authRoutes)
@@ -142,10 +145,12 @@ app.use("/api/cron", cronRoutes)
 app.use("/api/webhooks", webhookRoutes)
 app.use("/api/insurance-admin", insuranceAdminRoutes)
 app.use("/api/bank-admin", bankAdminRoutes)
+app.use("/api/notifications", notificationRoutes)
 app.use(errorMiddleware)
 
 // Initialize Socket.IO service
 const socketService = new SocketService(io)
+setSocketService(socketService)
 
 // Make io and socketService available globally for use in controllers
 app.set('io', io)

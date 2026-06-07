@@ -7,8 +7,7 @@ import { authenticate } from "../middleware/authenticate";
 import { createToken } from "../middleware/authenticate";
 import jwt from "jsonwebtoken";
 import passport from "passport";
-
-const JWT_SECRET = process.env.JWT_SECRET || "your_jwt_secret";
+import { JWT_SECRET, JWT_EXPIRES_IN } from "../config/jwtConfig";
 
 const router = Router();
 
@@ -40,7 +39,7 @@ router.get(
       email: user.email,
       firstName: user.firstName,
       lastName: user.lastName,
-    }, JWT_SECRET, { expiresIn: "7d" });
+    }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
     // Redirect to frontend with token as query param
     res.redirect(`https://lysp.io/auth/login?token=${token}`);
   }

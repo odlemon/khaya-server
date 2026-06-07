@@ -1,6 +1,10 @@
 // @ts-nocheck
 import { Request, Response, NextFunction } from "express";
 import { chatService, CreateMessageData, ViewingRequestData, MoveInRequestData, ViewingResponseData, MoveInResponseData } from "../services/ChatService";
+import { emitChatMessageRealtime } from "../utils/chatRealtime";
+import { getSocketService } from "../services/realtimeRegistry";
+import { syncNotificationsReadForChat } from "../utils/notificationReadSync";
+import { isMessageReadByUser } from "../utils/messageReadStatus";
 
 export class ChatController {
 
@@ -103,36 +107,30 @@ export class ChatController {
         
         const isMine = senderIdStr === userId;
         
-        // Debug logging
-        console.log(`Message ownership check:`, {
-          messageId: messageObj._id,
-          senderIdStr,
-          currentUserId: userId,
-          isMine,
-          messageContent: messageObj.content?.substring(0, 20) + '...'
-        });
-        
         return {
           ...messageObj,
           isMine,
           isFromCurrentUser: isMine,
-          // Add flag for private messages
+          isRead: isMessageReadByUser(messageObj, userId),
           isPrivate: messageObj.visibleTo && messageObj.visibleTo.length > 0,
-          taggedUser: messageObj.taggedUser || null
+          taggedUser: messageObj.taggedUser || null,
         };
       });
 
       // Mark messages as read (mark all unread messages in this chat as read)
       const unreadMessageIds = visibleMessages
         .filter((m: any) => {
-          const senderIdStr = (m.senderId?._id || m.senderId)?.toString?.() || "";
-          return senderIdStr !== userId && !m.isRead;
+          const messageObj = m.toObject ? m.toObject() : m;
+          const senderIdStr = (messageObj.senderId?._id || messageObj.senderId)?.toString?.() || "";
+          return senderIdStr !== userId && !isMessageReadByUser(messageObj, userId);
         })
         .map((m: any) => m._id.toString());
       
       if (unreadMessageIds.length > 0) {
         await chatService.markMessagesAsRead(chatId, unreadMessageIds, userId);
       }
+
+      const notificationRead = await syncNotificationsReadForChat(userId, chatId);
 
       // Ensure property data is included in response
       const chatObject = chat.toObject ? chat.toObject() : chat;
@@ -146,7 +144,9 @@ export class ChatController {
             propertyId: chatObject.propertyId || null, // Ensure propertyId is always included
             counterpart
           }, 
-          messages: messagesWithFlags 
+          messages: messagesWithFlags,
+          notificationsMarked: notificationRead.markedCount,
+          unreadNotificationCount: notificationRead.unreadCount,
         }
       });
     } catch (error: any) {
@@ -180,14 +180,6 @@ export class ChatController {
         attachments
       };
 
-      // Debug logging
-      console.log(`Sending message:`, {
-        chatId,
-        senderId: userId,
-        senderRole: userRole,
-        content: content?.substring(0, 20) + '...'
-      });
-
       const message = await chatService.sendMessage(messageData);
 
       // Add isMine flag to the response
@@ -199,10 +191,7 @@ export class ChatController {
       };
 
       // Emit real-time message to chat participants
-      const socketService = (req as any).app.get('socketService');
-      if (socketService) {
-        socketService.emitNewMessage(chatId, messageWithFlag);
-      }
+      emitChatMessageRealtime(req, chatId, messageWithFlag, { senderId: userId?.toString?.() });
 
       res.status(201).json({
         success: true,
@@ -252,11 +241,7 @@ export class ChatController {
         attachments
       });
 
-      // Emit real-time message to chat participants
-      const socketService = (req as any).app.get('socketService');
-      if (socketService) {
-        socketService.emitNewMessage(chat._id.toString(), message);
-      }
+      emitChatMessageRealtime(req, chat._id.toString(), message, { senderId: authUserId });
 
       return res.status(201).json({
         success: true,
@@ -274,10 +259,9 @@ export class ChatController {
   async markMessagesAsRead(req: Request, res: Response, next: NextFunction) {
     try {
       const userId = (req as any).user._id;
-      const { chatId } = req.params; // Get chatId from URL params
-      const { messageIds } = req.body; // Get messageIds from body
-
-      console.log('markMessagesAsRead called with:', { chatId, messageIds, userId });
+      const userIdStr = userId?.toString?.() || userId;
+      const { chatId } = req.params;
+      const { messageIds } = req.body || {}; // optional — omit body to mark all unread in chat
 
       if (!chatId) {
         return res.status(400).json({
@@ -286,39 +270,49 @@ export class ChatController {
         });
       }
 
-      // If no messageIds provided, mark all unread messages in the chat as read
       let messageIdsToMark = messageIds;
       if (!messageIds || !Array.isArray(messageIds) || messageIds.length === 0) {
-        // Get all unread messages in this chat
-        const { messages } = await chatService.getChatById(chatId, userId);
+        const { messages } = await chatService.getChatById(chatId, userIdStr);
         messageIdsToMark = messages
           .filter((m: any) => {
-            const senderIdStr = (m.senderId?._id || m.senderId)?.toString?.() || "";
-            return senderIdStr !== userId && !m.isRead;
+            const messageObj = m.toObject ? m.toObject() : m;
+            const senderIdStr = (messageObj.senderId?._id || messageObj.senderId)?.toString?.() || "";
+            return senderIdStr !== userIdStr && !isMessageReadByUser(messageObj, userIdStr);
           })
           .map((m: any) => m._id.toString());
       }
 
       if (messageIdsToMark.length === 0) {
+        const notificationRead = await syncNotificationsReadForChat(userIdStr, chatId);
         return res.status(200).json({
           success: true,
           message: "No messages to mark as read",
-          data: { modifiedCount: 0, messageIds: [] }
+          data: {
+            modifiedCount: 0,
+            messageIds: [],
+            notificationsMarked: notificationRead.markedCount,
+            unreadNotificationCount: notificationRead.unreadCount,
+          },
         });
       }
 
-      const result = await chatService.markMessagesAsRead(chatId, messageIdsToMark, userId);
+      const result = await chatService.markMessagesAsRead(chatId, messageIdsToMark, userIdStr);
 
-      // Emit read receipt to other participants
-      const socketService = (req as any).app.get('socketService');
+      const socketService = getSocketService() || (req as any).app.get("socketService");
       if (socketService) {
-        socketService.emitMessageRead(chatId, messageIdsToMark, userId);
+        socketService.emitMessageRead(chatId, messageIdsToMark, userIdStr);
       }
+
+      const notificationRead = await syncNotificationsReadForChat(userIdStr, chatId);
 
       res.status(200).json({
         success: true,
         message: "Messages marked as read",
-        data: result
+        data: {
+          ...result,
+          notificationsMarked: notificationRead.markedCount,
+          unreadNotificationCount: notificationRead.unreadCount,
+        },
       });
     } catch (error: any) {
       console.error('Error in markMessagesAsRead:', error);
@@ -331,7 +325,7 @@ export class ChatController {
    */
   async getOnlineUsers(req: Request, res: Response, next: NextFunction) {
     try {
-      const socketService = (req as any).app.get('socketService');
+      const socketService = getSocketService() || (req as any).app.get("socketService");
       
       if (!socketService) {
         return res.status(500).json({
@@ -387,6 +381,7 @@ export class ChatController {
       };
 
       const messageObj = await chatService.sendViewingRequest(viewingRequestData);
+      emitChatMessageRealtime(req, chatId, messageObj, { senderId: userId?.toString?.() });
 
       res.status(201).json({
         success: true,
@@ -431,6 +426,7 @@ export class ChatController {
       };
 
       const messageObj = await chatService.sendMoveInRequest(moveInRequestData);
+      emitChatMessageRealtime(req, chatId, messageObj, { senderId: userId?.toString?.() });
 
       res.status(201).json({
         success: true,
@@ -476,6 +472,9 @@ export class ChatController {
       };
 
       const responseMessage = await chatService.respondToViewingRequest(viewingResponseData);
+      emitChatMessageRealtime(req, responseMessage.chatId.toString(), responseMessage, {
+        senderId: userId?.toString?.(),
+      });
 
       res.status(200).json({
         success: true,
@@ -521,30 +520,14 @@ export class ChatController {
       };
 
       const responseMessage = await chatService.respondToMoveInRequest(moveInResponseData);
+      emitChatMessageRealtime(req, responseMessage.chatId.toString(), responseMessage, {
+        senderId: userId?.toString?.(),
+      });
 
       res.status(200).json({
         success: true,
         message: "Move-in request response sent successfully",
         data: responseMessage
-      });
-    } catch (error: any) {
-      next(error);
-    }
-  }
-
-  /**
-   * Mark messages as read
-   */
-  async markMessagesAsRead(req: Request, res: Response, next: NextFunction) {
-    try {
-      const userId = (req as any).user._id;
-      const { chatId } = req.params;
-
-      await chatService.markMessagesAsRead(chatId, userId);
-
-      res.status(200).json({
-        success: true,
-        message: "Messages marked as read"
       });
     } catch (error: any) {
       next(error);
@@ -711,10 +694,11 @@ export class ChatController {
    */
   async getAllChats(req: Request, res: Response, next: NextFunction) {
     try {
+      const adminId = (req as any).user._id?.toString?.();
       const page = parseInt(req.query.page as string) || 1;
       const limit = parseInt(req.query.limit as string) || 50;
 
-      const { chats, total } = await chatService.getAllChats(page, limit);
+      const { chats, total } = await chatService.getAllChats(page, limit, adminId);
 
       res.status(200).json({
         success: true,

@@ -5,7 +5,6 @@ import { authenticate, authorize } from "../middleware/authenticate";
 
 const router = express.Router();
 
-// Apply authentication middleware to all routes
 router.use(authenticate);
 
 // Chat management routes
@@ -15,13 +14,7 @@ router.post("/send", chatController.sendSimpleMessage.bind(chatController));
 router.get("/stats", chatController.getChatStats.bind(chatController));
 router.get("/unread-count", chatController.getUnreadCount.bind(chatController));
 
-// Chat-specific routes
-router.get("/:chatId", chatController.getChatById.bind(chatController));
-router.post("/:chatId/messages", chatController.sendMessage.bind(chatController));
-router.put("/:chatId/read", chatController.markMessagesAsRead.bind(chatController));
-router.delete("/:chatId", chatController.archiveChat.bind(chatController));
-
-// Real-time features
+// Real-time features (static paths before /:chatId)
 router.get("/online-users", chatController.getOnlineUsers.bind(chatController));
 
 // Viewing request routes
@@ -43,4 +36,10 @@ router.post("/admin/join/:chatId", authorize(["admin"]), chatController.adminJoi
 router.post("/admin/cleanup-duplicates", authorize(["admin"]), chatController.cleanupDuplicateParticipants.bind(chatController));
 router.post("/admin/link-to-property", authorize(["admin"]), chatController.linkChatToProperty.bind(chatController));
 
-export default router; 
+// Chat-specific routes (parameterized — must be last)
+router.get("/:chatId", chatController.getChatById.bind(chatController));
+router.post("/:chatId/messages", chatController.sendMessage.bind(chatController));
+router.put("/:chatId/read", chatController.markMessagesAsRead.bind(chatController));
+router.delete("/:chatId", chatController.archiveChat.bind(chatController));
+
+export default router;

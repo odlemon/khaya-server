@@ -2,7 +2,7 @@
 
 ## User story
 
-As a **bank administrator** using the Khayalami bank portal, I need to **settle insurance premiums** the same way I settle **landlord rent payouts**. Tenants pay rent into escrow; each payment can include an **insurance premium** deduction per property/landlord. After Khayalami runs **escrow distribution**, those premium slices are aggregated into an **insurance partner payout** batch. I must see pending batches, drill into contributing escrow lines (property, landlord, premium amount), and after our bank remits funds to the **insurance partner** outside the platform, **mark the batch paid** so the system reflects that remittance.
+As a **bank administrator** using the Khayalami bank portal, I need to **settle insurance premiums** the same way I settle **landlord rent payouts**. Tenants pay rent into escrow; each payment can include an **insurance premium** deduction per property/landlord. After Khayalami runs **escrow distribution**, those premium slices are aggregated into an **insurance partner payout** batch. I must see pending batches, drill into contributing escrow lines (property, landlord, premium amount), and after our bank remits funds to th e **insurance partner** outside the platform, **mark the batch paid** so the system reflects that remittance.
 
 ## How money links to insurance today
 

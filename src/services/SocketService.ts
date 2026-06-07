@@ -2,11 +2,23 @@
 import { Server as SocketIOServer, Socket } from "socket.io"
 import jwt from "jsonwebtoken"
 import { User } from "../models/User"
+import { Chat } from "../models/Chat"
+import { chatService } from "./ChatService"
 import { logger } from "../utils/logger"
+import { JWT_SECRET } from "../config/jwtConfig"
+import { isMessageReadByUser } from "../utils/messageReadStatus"
+import {
+  cacheUserDisplayName,
+  displayNameFromPopulatedSender,
+  displayNameFromUser,
+  resolveUserDisplayName,
+  resolveUserDisplayNames,
+} from "../utils/userDisplayName"
 
 interface AuthenticatedSocket extends Socket {
   userId?: string
   userRole?: string
+  userDisplayName?: string
 }
 
 interface OnlineUser {
@@ -18,7 +30,9 @@ interface OnlineUser {
 class SocketService {
   private io: SocketIOServer
   private onlineUsers: Map<string, OnlineUser> = new Map()
-  private userSockets: Map<string, Set<string>> = new Map() // userId -> Set of socketIds
+  private userSockets: Map<string, Set<string>> = new Map()
+  /** userId -> Set of chatIds the user has joined via join_chat */
+  private userChatRooms: Map<string, Set<string>> = new Map()
 
   constructor(io: SocketIOServer) {
     this.io = io
@@ -27,7 +41,6 @@ class SocketService {
   }
 
   private setupMiddleware() {
-    // Authentication middleware for Socket.IO
     this.io.use(async (socket: AuthenticatedSocket, next) => {
       try {
         const token = socket.handshake.auth.token || socket.handshake.headers.authorization?.replace('Bearer ', '')
@@ -36,7 +49,7 @@ class SocketService {
           return next(new Error('Authentication error: No token provided'))
         }
 
-        const decoded = jwt.verify(token, process.env.JWT_SECRET!) as any
+        const decoded = jwt.verify(token, JWT_SECRET) as any
         const user = await User.findById(decoded.userId).select('_id role firstName lastName email')
         
         if (!user) {
@@ -45,7 +58,13 @@ class SocketService {
 
         socket.userId = user._id.toString()
         socket.userRole = user.role
-        
+        socket.userDisplayName = displayNameFromUser(user)
+        cacheUserDisplayName(socket.userId, socket.userDisplayName)
+
+        console.log(
+          `[REALTIME] socket auth OK | ${socket.userDisplayName} (${user.email}) role=${user.role}`
+        )
+
         next()
       } catch (error) {
         logger.error('Socket authentication error:', error)
@@ -54,75 +73,126 @@ class SocketService {
     })
   }
 
+  private trackChatJoin(userId: string, chatId: string) {
+    if (!this.userChatRooms.has(userId)) {
+      this.userChatRooms.set(userId, new Set())
+    }
+    this.userChatRooms.get(userId)!.add(chatId)
+  }
+
+  private trackChatLeave(userId: string, chatId: string) {
+    const rooms = this.userChatRooms.get(userId)
+    if (rooms) {
+      rooms.delete(chatId)
+      if (rooms.size === 0) {
+        this.userChatRooms.delete(userId)
+      }
+    }
+  }
+
   private setupEventHandlers() {
     this.io.on('connection', (socket: AuthenticatedSocket) => {
       const userId = socket.userId!
+      const userName = socket.userDisplayName || userId
       const socketId = socket.id
 
+      console.log(`[REALTIME] socket connected | ${userName} socketId=${socketId}`)
       logger.info(`User ${userId} connected with socket ${socketId}`)
 
-      // Add user to online users
       this.addOnlineUser(userId, socketId)
-
-      // Join user to their personal room
       socket.join(`user:${userId}`)
+      console.log(`[REALTIME] joined room | ${userName}`)
 
-      // Handle joining chat rooms
-      socket.on('join_chat', (chatId: string) => {
-        socket.join(`chat:${chatId}`)
-        logger.info(`User ${userId} joined chat ${chatId}`)
+      if (socket.userRole === "admin") {
+        socket.join("role:admin")
+        console.log(`[REALTIME] admin monitoring room joined | ${userName}`)
+      }
+
+      socket.on('join_chat', async (chatId: string) => {
+        try {
+          const chat = await Chat.findById(chatId).select('participants')
+          if (!chat) {
+            socket.emit('socket_error', { message: 'Chat not found', chatId })
+            return
+          }
+
+          const isParticipant = chat.participants.some(
+            (p: any) => p.toString() === userId
+          )
+
+          if (!isParticipant) {
+            socket.emit('socket_error', { message: 'Access denied', chatId })
+            return
+          }
+
+          socket.join(`chat:${chatId}`)
+          this.trackChatJoin(userId, chatId)
+          console.log(`[REALTIME] join_chat OK | ${userName} chatId=${chatId}`)
+          logger.info(`User ${userId} joined chat ${chatId}`)
+          socket.emit('joined_chat', { chatId })
+        } catch (error: any) {
+          socket.emit('socket_error', { message: error.message, chatId })
+        }
       })
 
-      // Handle leaving chat rooms
       socket.on('leave_chat', (chatId: string) => {
         socket.leave(`chat:${chatId}`)
+        this.trackChatLeave(userId, chatId)
+        console.log(`[REALTIME] leave_chat | ${userName} chatId=${chatId}`)
         logger.info(`User ${userId} left chat ${chatId}`)
       })
 
-      // Handle typing indicators
       socket.on('typing_start', (data: { chatId: string }) => {
-        logger.info(`📥 [SOCKET RECEIVE] typing_start from user ${userId} in chat ${data.chatId}`);
-        
         socket.to(`chat:${data.chatId}`).emit('user_typing', {
           userId,
           chatId: data.chatId,
           isTyping: true
-        });
-        
-        logger.info(`📤 [SOCKET BROADCAST] Typing indicator sent to chat:${data.chatId}`);
+        })
       })
 
       socket.on('typing_stop', (data: { chatId: string }) => {
-        logger.info(`📥 [SOCKET RECEIVE] typing_stop from user ${userId} in chat ${data.chatId}`);
-        
         socket.to(`chat:${data.chatId}`).emit('user_typing', {
           userId,
           chatId: data.chatId,
           isTyping: false
-        });
-        
-        logger.info(`📤 [SOCKET BROADCAST] Stop typing sent to chat:${data.chatId}`);
+        })
       })
 
-      // Handle message read receipts
-      socket.on('mark_messages_read', (data: { chatId: string, messageIds: string[] }) => {
-        logger.info(`📥 [SOCKET RECEIVE] mark_messages_read from user ${userId}`);
-        logger.info(`   Chat: ${data.chatId}`);
-        logger.info(`   Messages: ${data.messageIds.join(', ')}`);
-        
-        socket.to(`chat:${data.chatId}`).emit('messages_read', {
-          userId,
-          chatId: data.chatId,
-          messageIds: data.messageIds,
-          readAt: new Date()
-        });
-        
-        logger.info(`📤 [SOCKET BROADCAST] Read receipt sent to chat:${data.chatId}`);
+      socket.on('mark_messages_read', async (data: { chatId: string, messageIds?: string[] }) => {
+        try {
+          const messageIds = data.messageIds || []
+          let idsToMark = messageIds
+
+          if (!idsToMark.length) {
+            const { messages } = await chatService.getChatById(data.chatId, userId)
+            idsToMark = messages
+              .filter((m: any) => {
+                const messageObj = m.toObject ? m.toObject() : m
+                const senderIdStr = (messageObj.senderId?._id || messageObj.senderId)?.toString?.() || ""
+                return senderIdStr !== userId && !isMessageReadByUser(messageObj, userId)
+              })
+              .map((m: any) => m._id.toString())
+          }
+
+          if (idsToMark.length) {
+            await chatService.markMessagesAsRead(data.chatId, idsToMark, userId)
+            console.log(
+              `[REALTIME] mark_messages_read | chatId=${data.chatId} readBy=${userName} count=${idsToMark.length}`
+            )
+            this.emitMessageRead(data.chatId, idsToMark, userId)
+          }
+
+          const { syncNotificationsReadForChat } = await import("../utils/notificationReadSync")
+          await syncNotificationsReadForChat(userId, data.chatId)
+        } catch (error: any) {
+          logger.error('mark_messages_read error:', error)
+        }
       })
 
-      // Handle disconnect
       socket.on('disconnect', () => {
+        this.userChatRooms.delete(userId)
         this.removeOnlineUser(userId, socketId)
+        console.log(`[REALTIME] socket disconnected | ${userName} socketId=${socketId}`)
         logger.info(`User ${userId} disconnected (socket ${socketId})`)
       })
     })
@@ -137,15 +207,12 @@ class SocketService {
     
     this.onlineUsers.set(socketId, onlineUser)
     
-    // Track user's sockets
     if (!this.userSockets.has(userId)) {
       this.userSockets.set(userId, new Set())
     }
     this.userSockets.get(userId)!.add(socketId)
 
-    // Notify others that user is online
-    logger.info(`📤 [SOCKET BROADCAST] user_online event for user ${userId}`);
-    this.io.emit('user_online', { userId });
+    this.io.emit('user_online', { userId })
   }
 
   private removeOnlineUser(userId: string, socketId: string) {
@@ -155,44 +222,127 @@ class SocketService {
     if (userSocketSet) {
       userSocketSet.delete(socketId)
       
-      // If user has no more sockets, they're offline
       if (userSocketSet.size === 0) {
         this.userSockets.delete(userId)
-        logger.info(`📤 [SOCKET BROADCAST] user_offline event for user ${userId}`);
-        this.io.emit('user_offline', { userId });
+        this.io.emit('user_offline', { userId })
       }
     }
   }
 
-  // Public methods for use in controllers
-  public emitNewMessage(chatId: string, message: any) {
+  public isUserInChatRoom(userId: string, chatId: string): boolean {
+    return this.userChatRooms.get(userId)?.has(chatId) || false
+  }
+
+  public async emitNewMessage(chatId: string, message: any) {
     const payload = {
       chatId,
       message
-    };
-    
-    logger.info(`📤 [SOCKET EMIT] new_message to chat:${chatId}`);
-    logger.info(`   Message ID: ${message._id}`);
-    logger.info(`   Sender: ${message.senderId}`);
-    logger.info(`   Content: ${message.content?.substring(0, 50)}...`);
-    logger.info(`   isMine flag: ${message.isMine}`);
-    
-    // If message has visibility restrictions, emit only to specific users
-    if (message.visibleTo && message.visibleTo.length > 0) {
-      const visibleToIds = message.visibleTo.map((id: any) => id.toString ? id.toString() : id);
-      logger.info(`   🔒 Private message - Visible to: ${visibleToIds.join(', ')}`);
-      logger.info(`   Tagged: ${message.taggedUser || 'none'}`);
-      
-      // Emit to each visible user's personal room
-      visibleToIds.forEach((userId: string) => {
-        this.io.to(`user:${userId}`).emit('new_message', payload);
-        logger.info(`   ✅ Emitted to user:${userId}`);
-      });
-    } else {
-      // Public message - emit to entire chat room
-      this.io.to(`chat:${chatId}`).emit('new_message', payload);
-      logger.info(`✅ [SOCKET EMIT] Message emitted successfully to room chat:${chatId}`);
     }
+
+    const senderId =
+      (message.senderId?._id || message.senderId)?.toString?.() || ""
+
+    const messageId = message._id?.toString?.() || "unknown"
+
+    if (message.visibleTo && message.visibleTo.length > 0) {
+      const visibleToIds = message.visibleTo.map((id: any) =>
+        id.toString ? id.toString() : id
+      )
+
+      const recipientUserIds = visibleToIds.filter((uid) => uid !== senderId)
+
+      recipientUserIds.forEach((uid: string) => {
+        this.io.to(`user:${uid}`).emit("new_message", payload)
+      })
+
+      // Admin portal sees all messages (including private); no notification/socket to untagged parties
+      this.io.to("role:admin").emit("new_message", payload)
+
+      const senderName =
+        displayNameFromPopulatedSender(message.senderId) ||
+        (await resolveUserDisplayName(senderId))
+      const recipientNames = await resolveUserDisplayNames(recipientUserIds)
+      const recipientLabels = recipientUserIds.map((id) => recipientNames.get(id) || id)
+
+      console.log(
+        `[REALTIME] emit new_message (private) | chatId=${chatId} messageId=${messageId} from=${senderName} → ${recipientLabels.join(", ")} + admin monitoring (no notification to others)`
+      )
+      return
+    }
+
+    this.io.to(`chat:${chatId}`).emit("new_message", payload)
+    this.io.to("role:admin").emit("new_message", payload)
+
+    const participantTargets: string[] = []
+    try {
+      const chat = await Chat.findById(chatId).select("participants").lean()
+      if (chat?.participants?.length) {
+        for (const participant of chat.participants) {
+          const participantId = participant.toString()
+          if (participantId && participantId !== senderId) {
+            this.io.to(`user:${participantId}`).emit("new_message", payload)
+            participantTargets.push(participantId)
+          }
+        }
+      }
+    } catch (error: any) {
+      logger.error("emitNewMessage participant delivery failed:", error)
+    }
+
+    const senderName =
+      displayNameFromPopulatedSender(message.senderId) ||
+      (await resolveUserDisplayName(senderId))
+    const participantNames = await resolveUserDisplayNames(participantTargets)
+    const recipientLabels = participantTargets.map(
+      (id) => participantNames.get(id) || "Unknown user"
+    )
+
+    console.log(
+      `[REALTIME] emit new_message | chatId=${chatId} messageId=${messageId} from=${senderName} → ${recipientLabels.join(", ") || "no other participants"} + all admins`
+    )
+  }
+
+  public emitNotificationCreated(userId: string, payload: any) {
+    const notifId = payload?.notification?._id?.toString?.() || "unknown"
+    const notifType = payload?.notification?.type || "unknown"
+
+    void resolveUserDisplayName(userId).then((recipientName) => {
+      console.log(
+        `[REALTIME] emit notification_created | to=${recipientName} id=${notifId} type=${notifType}`
+      )
+    })
+
+    this.io.to(`user:${userId}`).emit('notification_created', payload)
+  }
+
+  public emitNotificationsMarkedRead(
+    userId: string,
+    payload: {
+      chatId: string;
+      markedCount: number;
+      notificationIds: string[];
+      unreadCount: number;
+    }
+  ) {
+    void resolveUserDisplayName(userId).then((name) => {
+      console.log(
+        `[REALTIME] emit notifications_marked_read | user=${name} chatId=${payload.chatId} marked=${payload.markedCount} unreadCount=${payload.unreadCount}`
+      );
+    });
+
+    this.io.to(`user:${userId}`).emit("notifications_marked_read", payload);
+  }
+
+  public emitChatNotification(userId: string, notification: any) {
+    const notifId = notification?.notification?._id?.toString?.() || "unknown"
+
+    void resolveUserDisplayName(userId).then((recipientName) => {
+      console.log(
+        `[REALTIME] emit chat_notification (legacy) | to=${recipientName} id=${notifId}`
+      )
+    })
+
+    this.io.to(`user:${userId}`).emit('chat_notification', notification)
   }
 
   public emitMessageRead(chatId: string, messageIds: string[], readBy: string) {
@@ -201,28 +351,23 @@ class SocketService {
       messageIds,
       readBy,
       readAt: new Date()
-    };
-    
-    logger.info(`📤 [SOCKET EMIT] messages_read to chat:${chatId}`);
-    logger.info(`   Message IDs: ${messageIds.join(', ')}`);
-    logger.info(`   Read by: ${readBy}`);
-    
-    this.io.to(`chat:${chatId}`).emit('messages_read', payload);
-    
-    logger.info(`✅ [SOCKET EMIT] Read receipt emitted to room chat:${chatId}`);
+    }
+
+    void resolveUserDisplayName(readBy).then((readerName) => {
+      console.log(
+        `[REALTIME] emit messages_read | chatId=${chatId} readBy=${readerName} count=${messageIds.length}`
+      )
+    })
+
+    this.io.to(`chat:${chatId}`).emit('messages_read', payload)
   }
 
   public emitTypingIndicator(chatId: string, userId: string, isTyping: boolean) {
-    const payload = {
+    this.io.to(`chat:${chatId}`).emit('user_typing', {
       userId,
       chatId,
       isTyping
-    };
-    
-    logger.info(`📤 [SOCKET EMIT] user_typing to chat:${chatId}`);
-    logger.info(`   User: ${userId} - ${isTyping ? 'Started' : 'Stopped'} typing`);
-    
-    this.io.to(`chat:${chatId}`).emit('user_typing', payload);
+    })
   }
 
   public isUserOnline(userId: string): boolean {
@@ -243,14 +388,3 @@ class SocketService {
 }
 
 export default SocketService
-
-
-
-
-
-
-
-
-
-
-

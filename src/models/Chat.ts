@@ -55,8 +55,11 @@ export interface IMessage extends Document {
       responseDate: Date;
     };
   };
+  /** @deprecated Use readBy — kept for legacy documents */
   isRead: boolean;
   readAt?: Date;
+  /** Per-user read tracking — user IDs who have read this message */
+  readBy: mongoose.Types.ObjectId[];
   createdAt: Date;
   updatedAt: Date;
 }
@@ -179,7 +182,11 @@ const messageSchema = new Schema<IMessage>({
     type: Boolean,
     default: false
   },
-  readAt: Date
+  readAt: Date,
+  readBy: [{
+    type: Schema.Types.ObjectId,
+    ref: "User"
+  }]
 }, {
   timestamps: true
 });
@@ -192,6 +199,7 @@ chatSchema.index({ "lastMessage.timestamp": -1 });
 messageSchema.index({ chatId: 1, createdAt: -1 });
 messageSchema.index({ senderId: 1 });
 messageSchema.index({ isRead: 1 });
+messageSchema.index({ chatId: 1, readBy: 1 });
 
 // Virtual for unread message count
 chatSchema.virtual("unreadCount", {

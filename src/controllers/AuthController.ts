@@ -6,8 +6,7 @@ import { EmailVerificationService } from "../services/EmailVerificationService";
 import { TwoFactorAuthService } from "../services/TwoFactorAuthService";
 import { PasswordResetService } from "../services/PasswordResetService";
 import jwt from "jsonwebtoken";
-
-const JWT_SECRET = process.env.JWT_SECRET || "your_jwt_secret";
+import { JWT_SECRET, JWT_EXPIRES_IN } from "../config/jwtConfig";
 
 export class AuthController {
       async register(req: Request, res: Response, next: NextFunction) {
@@ -228,7 +227,7 @@ export class AuthController {
         email: user.email,
         firstName: user.firstName,
         lastName: user.lastName,
-      }, JWT_SECRET, { expiresIn: "7d" });
+      }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
 
       // Get document verification status
       const documentVerificationStatus = user.documentVerification?.status || "unverified";
@@ -303,7 +302,7 @@ export class AuthController {
           email: user.email,
           firstName: user.firstName,
           lastName: user.lastName,
-        }, JWT_SECRET, { expiresIn: "7d" });
+        }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
 
         // Get document verification status
         const documentVerificationStatus = user.documentVerification?.status || "unverified";
