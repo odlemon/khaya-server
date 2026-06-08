@@ -8,23 +8,29 @@ Implementation guide for the **Khayalami web portal** (landlord, tenant, and adm
 
 ## Production endpoints
 
+**Portal on `https://khayamanage.co.zw` (nginx proxy — recommended):**
+
+```env
+VITE_API_URL=https://khayamanage.co.zw/api/backend
+VITE_SOCKET_URL=https://khayamanage.co.zw
+```
+
+| Service | URL |
+|---------|-----|
+| REST API | `https://khayamanage.co.zw/api/backend` |
+| Socket.IO | `https://khayamanage.co.zw` (path `/socket.io/`, **not** under `/api/backend`) |
+| Health | `GET https://khayamanage.co.zw/api/backend/health` |
+
+Nginx config: [`deploy/nginx-khayamanage-portal.conf`](../deploy/nginx-khayamanage-portal.conf) — must include **both** `/api/backend/` and `/socket.io/` proxy blocks.
+
+**Direct to backend (dev / no portal proxy):**
+
 ```env
 VITE_API_URL=http://31.220.82.129:4002/api
 VITE_SOCKET_URL=http://31.220.82.129:4002
 ```
 
-| Service | URL |
-|---------|-----|
-| REST API | `http://31.220.82.129:4002/api` |
-| Socket.IO | `http://31.220.82.129:4002` (same host, **no** `/api` prefix) |
-| Health | `GET http://31.220.82.129:4002/health` |
-
-Server env (Ubuntu):
-
-```env
-SOCKET_CORS_ORIGINS=https://your-portal-domain.com,http://31.220.82.129:4002
-JWT_SECRET=<same secret used by portal login>
-```
+Socket CORS for `https://khayamanage.co.zw` is hardcoded in `src/utils/socketCors.ts` — no server env needed.
 
 ---
 

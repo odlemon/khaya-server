@@ -32,6 +32,7 @@ export class DatabaseConnection {
         socketTimeoutMS: 45000,
         maxPoolSize,
         heartbeatFrequencyMS: 10000,
+        maxIdleTimeMS: 60000,
         retryWrites: true,
       });
       
@@ -43,7 +44,11 @@ export class DatabaseConnection {
       });
       
       mongoose.connection.on('disconnected', () => {
-        console.log('📤 MongoDB disconnected');
+        console.log('📤 MongoDB disconnected — will auto-reconnect on next query');
+      });
+
+      mongoose.connection.on('reconnected', () => {
+        console.log('✅ MongoDB reconnected');
       });
       
     } catch (error) {
