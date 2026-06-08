@@ -7,6 +7,7 @@ import { Chat } from "../models/Chat";
 import { Agreement } from "../models/Agreement";
 import { Types } from "mongoose";
 import { NOT_ADMIN_TERMINATED } from "../constants/userQueries";
+import { userHardDeleteService } from "../services/UserHardDeleteService";
 
 export class AdminController {
   /**
@@ -182,6 +183,62 @@ export class AdminController {
         }
       });
     } catch (error: any) {
+      next(error);
+    }
+  }
+
+  /**
+   * Permanently delete a user and all related records (irreversible).
+   */
+  async hardDeleteUser(req: Request, res: Response, next: NextFunction) {
+    try {
+      const adminId = (req as any).user._id;
+      const { userId } = req.params;
+
+      if (!Types.ObjectId.isValid(userId)) {
+        return res.status(400).json({ success: false, message: "Invalid user ID" });
+      }
+
+      if (adminId.toString() === userId) {
+        return res.status(400).json({
+          success: false,
+          message: "You cannot delete your own account.",
+        });
+      }
+
+      const target = await User.findById(userId).select("role email firstName lastName");
+      if (!target) {
+        return res.status(404).json({ success: false, message: "User not found" });
+      }
+
+      if (target.role === "admin") {
+        return res.status(403).json({
+          success: false,
+          message: "Admin accounts cannot be hard-deleted via this endpoint.",
+        });
+      }
+
+      const result = await userHardDeleteService.hardDeleteByUserId(userId);
+
+      if (!result.deleted) {
+        return res.status(404).json({ success: false, message: "User not found" });
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: `User ${result.user.email} and related data permanently deleted.`,
+        data: {
+          user: result.user,
+          deletedCounts: result.deletedCounts,
+        },
+      });
+    } catch (error: any) {
+      if (error.message === "DELETE_FAILED") {
+        return res.status(500).json({
+          success: false,
+          message: "User deletion did not complete. Please retry or check server logs.",
+        });
+      }
       next(error);
     }
   }

@@ -142,7 +142,7 @@ export class AuthController {
       }
 
       const normalizedEmail = email.trim().toLowerCase();
-      const user = await User.findOne({ email: normalizedEmail });
+      const user = await User.findOne({ email: normalizedEmail }).maxTimeMS(15000);
       if (!user) {
         return res.status(401).json({ success: false, message: "Invalid credentials." });
       }

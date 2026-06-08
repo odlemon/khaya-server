@@ -20,6 +20,7 @@ router.get("/analytics", adminController.getAnalytics.bind(adminController));
 
 // User management routes
 router.get("/users", adminController.getUsers.bind(adminController));
+router.delete("/users/:userId", adminController.hardDeleteUser.bind(adminController));
 router.put("/users/:userId/status", adminController.updateUserStatus.bind(adminController));
 
 // Property management routes

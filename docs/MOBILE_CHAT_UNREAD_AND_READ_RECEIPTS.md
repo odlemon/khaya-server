@@ -12,7 +12,7 @@
 2. Landlord on **mobile** still has **not** opened the chat  
 3. **Bug:** Landlord’s unread badge also disappeared, or the message showed as “read” for landlord
 
-**Cause:** The mobile app was treating `message.isRead` as global (one read = read for everyone). The backend now tracks **`readBy` per user** — the **mobile app must use that correctly**.
+**Cause:** The mobile app was treating `message.isRead` as global (one rea  d = read for everyone). The backend now tracks **`readBy` per user** — the **mobile app must use that correctly**.
 
 ---
 

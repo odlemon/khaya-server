@@ -2,9 +2,12 @@
 import type { Request, Response, NextFunction } from "express"
 import { logger } from "../utils/logger"
 import { envConfig } from "../utils/env"
+import { isTransientDbError } from "../utils/dbErrors"
 
 export const errorMiddleware = (err: any, req: Request, res: Response, next: NextFunction): void => {
-  logger.error("Unhandled error", {
+  const isDbUnavailable = isTransientDbError(err)
+
+  logger.error(isDbUnavailable ? "Database temporarily unavailable" : "Unhandled error", {
     error: err.message,
     stack: err.stack,
     path: req.path,
@@ -16,8 +19,11 @@ export const errorMiddleware = (err: any, req: Request, res: Response, next: Nex
 
   
   const error = {
-    message: err.message || "Internal server error",
-    status: err.status || 500,
+    message: isDbUnavailable
+      ? "Database temporarily unavailable. Please retry."
+      : err.message || "Internal server error",
+    status: isDbUnavailable ? 503 : err.status || 500,
+    code: isDbUnavailable ? "DB_UNAVAILABLE" : undefined,
   }
 
   if (err.name === "ValidationError") {
@@ -39,6 +45,7 @@ export const errorMiddleware = (err: any, req: Request, res: Response, next: Nex
   res.status(error.status).json({
     success: false,
     message: error.message,
+    ...(error.code && { code: error.code }),
     ...(envConfig.isDevelopment() && {
       stack: err.stack,
       originalError: err.message,
