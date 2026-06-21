@@ -2,6 +2,7 @@
 import { PaymentRequest, IPaymentRequest } from "../models/PaymentRequest";
 import { Payment, IPayment } from "../models/Payment";
 import { Rental } from "../models/Rental";
+import { assertRentalAcceptsTenantPayments } from "../utils/rentalCapabilities";
 import { Property } from "../models/Property";
 import { escrowService } from "./EscrowService";
 import { paymentCalculationService } from "./PaymentCalculationService";
@@ -77,6 +78,8 @@ export class PaymentRequestService {
       if (!rental) {
         throw new Error("Rental not found");
       }
+
+      assertRentalAcceptsTenantPayments(rental);
 
       // Create payment request for rent
       const paymentRequest = await PaymentRequest.create({
@@ -313,13 +316,20 @@ export class PaymentRequestService {
         const { Agreement } = await import("../models/Agreement");
         const agreement = await Agreement.findById(paymentRequest.agreementId);
         if (agreement) {
-          if (!agreement.tenantSignature) {
-            agreement.tenantSignature = { paymentStatus: "verified" } as any;
+          if (paymentRequest.requestType === "agreement_fee") {
+            const { agreementFeeService } = await import("./AgreementFeeService");
+            await agreementFeeService.markFeeChargedFromUpfrontPayment(
+              agreement,
+              paymentRequest.amount
+            );
           } else {
-            agreement.tenantSignature.paymentStatus = "verified";
+            if (!agreement.tenantSignature) {
+              agreement.tenantSignature = { paymentStatus: "verified" } as any;
+            } else {
+              agreement.tenantSignature.paymentStatus = "verified";
+            }
+            await agreement.save();
           }
-          agreement.tenantSignature.paymentStatus = "verified";
-          await agreement.save();
         }
       }
     }

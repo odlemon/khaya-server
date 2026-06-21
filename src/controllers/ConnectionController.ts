@@ -6,6 +6,8 @@ import { Property } from "../models/Property";
 import { Types } from "mongoose";
 import { chatService } from "../services/ChatService";
 import { emailNotificationService } from "../services/EmailNotificationService";
+import { appNotificationService } from "../services/AppNotificationService";
+import { enrichTenantConnections, applyLandlordConnectionListFilter, LANDLORD_CLEARABLE_CONNECTION_STATUSES } from "../utils/connectionPipeline";
 import { emitChatMessageRealtime } from "../utils/chatRealtime";
 
 export class ConnectionController {
@@ -64,32 +66,37 @@ export class ConnectionController {
         });
       }
 
-      // Check if an active connection already exists
-      const existingConnection = await Connection.findOne({
+      // Block duplicate live requests (pending or accepted on same property)
+      const activeConnection = await Connection.findOne({
         tenantId: userId,
         landlordId,
         propertyId,
-        isActive: true
+        isActive: true,
+        status: { $in: ["pending", "accepted"] },
       });
 
-      if (existingConnection) {
+      if (activeConnection) {
         return res.status(409).json({
           success: false,
           message: "Connection request already exists",
           data: {
-            status: existingConnection.status,
-            canChat: existingConnection.status === "accepted"
+            status: activeConnection.status,
+            canChat: activeConnection.status === "accepted"
           }
         });
       }
 
-      // Check if there's an inactive connection to reactivate
-      const inactiveConnection = await Connection.findOne({
-        tenantId: userId,
-        landlordId,
-        propertyId,
-        isActive: false
-      });
+      // Legacy rows: rejected but still marked active — archive so tenant can re-apply
+      await Connection.updateMany(
+        {
+          tenantId: userId,
+          landlordId,
+          propertyId,
+          isActive: true,
+          status: { $in: ["rejected", "cancelled"] },
+        },
+        { $set: { isActive: false } }
+      );
 
       const tenantDetails: any = {};
       if (expectedMoveInDate) tenantDetails.expectedMoveInDate = new Date(expectedMoveInDate);
@@ -127,29 +134,20 @@ export class ConnectionController {
       if (specialRequirements) tenantDetails.specialRequirements = specialRequirements.trim();
 
       let connection;
-      if (inactiveConnection) {
-        // Reactivate the existing connection
-        inactiveConnection.status = "pending";
-        inactiveConnection.message = message.trim();
-        inactiveConnection.isActive = true;
-        inactiveConnection.createdAt = new Date();
-        inactiveConnection.respondedAt = null;
-        inactiveConnection.responseMessage = null;
-        inactiveConnection.respondedBy = undefined;
-        Object.assign(inactiveConnection, tenantDetails);
-        await inactiveConnection.save();
-        connection = inactiveConnection;
-      } else {
-        connection = new Connection({
-          tenantId: userId,
-          landlordId,
-          propertyId,
-          message: message.trim(),
-          status: "pending",
-          ...tenantDetails
-        });
-        await connection.save();
-      }
+      // Always create a new row so withdrawn/declined history is preserved
+      connection = new Connection({
+        tenantId: userId,
+        landlordId,
+        propertyId,
+        message: message.trim(),
+        status: "pending",
+        ...tenantDetails
+      });
+      await connection.save();
+
+      const notifyLandlordId = String(landlordId);
+      const notifyPropertyId = String(propertyId);
+      const notifyConnectionId = connection._id.toString();
 
       // Populate user and property details for response
       await connection.populate([
@@ -157,6 +155,29 @@ export class ConnectionController {
         { path: "landlordId", select: "firstName lastName email" },
         { path: "propertyId", select: "title address images" }
       ]);
+
+      const tenantUser = connection.tenantId as any;
+      const propertyDoc = connection.propertyId as any;
+      const tenantName = tenantUser
+        ? `${tenantUser.firstName || ""} ${tenantUser.lastName || ""}`.trim() || "A tenant"
+        : "A tenant";
+      const propertyTitle = propertyDoc?.title || "Your listing";
+
+      try {
+        await appNotificationService.notify({
+          userId: notifyLandlordId,
+          type: "connection_request",
+          title: "New rental request",
+          body: `${tenantName} requested to rent ${propertyTitle}`,
+          data: {
+            connectionId: notifyConnectionId,
+            propertyId: notifyPropertyId,
+            senderId: userId.toString(),
+          },
+        });
+      } catch (notifyErr) {
+        console.error("In-app notify (connection request):", notifyErr?.message || notifyErr);
+      }
 
       res.status(201).json({
         success: true,
@@ -175,7 +196,7 @@ export class ConnectionController {
     try {
       const userId = (req as any).user._id;
       const userRole = (req as any).user.role;
-      const { status, page = 1, limit = 20 } = req.query;
+      const { status, page = 1, limit = 20, includeDismissed } = req.query;
 
       // Only landlords can view connection requests
       if (userRole !== "landlord") {
@@ -185,11 +206,12 @@ export class ConnectionController {
         });
       }
 
-      // Build query
       const query: any = { landlordId: userId };
-      if (status) {
-        query.status = status;
-      }
+      applyLandlordConnectionListFilter(
+        query,
+        status as string | undefined,
+        includeDismissed === "true"
+      );
 
       const skip = (Number(page) - 1) * Number(limit);
 
@@ -227,7 +249,7 @@ export class ConnectionController {
     try {
       const userId = (req as any).user._id;
       const userRole = (req as any).user.role;
-      const { status, page = 1, limit = 20 } = req.query;
+      const { status, page = 1, limit = 20, includeDismissed } = req.query;
 
       // Only tenants can view their connection requests
       if (userRole !== "tenant") {
@@ -242,6 +264,12 @@ export class ConnectionController {
       if (status) {
         query.status = status;
       }
+      if (includeDismissed !== "true") {
+        query.$or = [
+          { dismissedByTenantAt: { $exists: false } },
+          { dismissedByTenantAt: null },
+        ];
+      }
 
       const skip = (Number(page) - 1) * Number(limit);
 
@@ -254,10 +282,11 @@ export class ConnectionController {
         .limit(Number(limit));
 
       const total = await Connection.countDocuments(query);
+      const enriched = await enrichTenantConnections(connections);
 
       res.status(200).json({
         success: true,
-        data: connections,
+        data: enriched,
         pagination: {
           page: Number(page),
           limit: Number(limit),
@@ -328,6 +357,9 @@ export class ConnectionController {
       connection.responseMessage = message?.trim();
       connection.respondedAt = new Date();
       connection.respondedBy = userId;
+      if (status === "rejected") {
+        connection.isActive = false;
+      }
 
       await connection.save();
 
@@ -374,12 +406,13 @@ export class ConnectionController {
         });
       }
 
-      // Find connection
+      // Current live request for this property (ignore archived history rows)
       const connection = await Connection.findOne({
         tenantId: userRole === "tenant" ? userId : null,
         landlordId,
-        propertyId
-      });
+        propertyId,
+        isActive: true,
+      }).sort({ createdAt: -1 });
 
       if (!connection) {
         return res.status(200).json({
@@ -430,12 +463,23 @@ export class ConnectionController {
         });
       }
 
+      const listQuery = { ...query };
+      const includeDismissed = req.query.includeDismissed === "true";
+      if (userRole === "landlord") {
+        applyLandlordConnectionListFilter(listQuery, undefined, includeDismissed);
+      } else if (userRole === "tenant" && !includeDismissed) {
+        listQuery.$or = [
+          { dismissedByTenantAt: { $exists: false } },
+          { dismissedByTenantAt: null },
+        ];
+      }
+
       const [pending, accepted, rejected, cancelled, total] = await Promise.all([
-        Connection.countDocuments({ ...query, status: "pending" }),
-        Connection.countDocuments({ ...query, status: "accepted" }),
-        Connection.countDocuments({ ...query, status: "rejected" }),
-        Connection.countDocuments({ ...query, status: "cancelled" }),
-        Connection.countDocuments(query)
+        Connection.countDocuments({ ...listQuery, status: "pending" }),
+        Connection.countDocuments({ ...listQuery, status: "accepted" }),
+        Connection.countDocuments({ ...listQuery, status: "rejected" }),
+        Connection.countDocuments({ ...listQuery, status: "cancelled" }),
+        Connection.countDocuments(listQuery),
       ]);
 
       res.status(200).json({
@@ -507,8 +551,17 @@ export class ConnectionController {
       const landlord = await User.findById(connection.landlordId).select("firstName lastName email");
       const property = await Property.findById(connection.propertyId).select("title");
 
+      const tenantName = tenant
+        ? `${tenant.firstName || ""} ${tenant.lastName || ""}`.trim() || "A tenant"
+        : "A tenant";
+      const notifyLandlordId = connection.landlordId.toString();
+      const notifyPropertyId = connection.propertyId.toString();
+      const notifyConnectionId = connection._id.toString();
+
       connection.status = "cancelled";
       connection.isActive = false;
+      connection.dismissedByTenantAt = undefined;
+      connection.dismissedByLandlordAt = undefined;
       connection.responseMessage =
         typeof cancelReason === "string" && cancelReason.trim()
           ? cancelReason.trim().slice(0, 500)
@@ -524,9 +577,6 @@ export class ConnectionController {
       ]);
 
       if (landlord?.email) {
-        const tenantName = tenant
-          ? `${tenant.firstName || ""} ${tenant.lastName || ""}`.trim() || "A tenant"
-          : "A tenant";
         const landlordName =
           `${landlord.firstName || ""} ${landlord.lastName || ""}`.trim() || "Landlord";
         try {
@@ -541,6 +591,22 @@ export class ConnectionController {
         } catch (emailErr) {
           console.error("Landlord notify (connection cancelled):", emailErr?.message || emailErr);
         }
+      }
+
+      try {
+        await appNotificationService.notify({
+          userId: notifyLandlordId,
+          type: "connection_cancelled",
+          title: "Rental request withdrawn",
+          body: `${tenantName} withdrew their request for ${property?.title || "your listing"}`,
+          data: {
+            connectionId: notifyConnectionId,
+            propertyId: notifyPropertyId,
+            senderId: userId.toString(),
+          },
+        });
+      } catch (notifyErr) {
+        console.error("In-app notify (connection cancelled):", notifyErr?.message || notifyErr);
       }
 
       res.status(200).json({
@@ -559,13 +625,15 @@ export class ConnectionController {
   async getLandlordConnections(req: Request, res: Response, next: NextFunction) {
     try {
       const userId = (req as any).user._id;
-      const { status, propertyId } = req.query;
+      const { status, propertyId, includeDismissed } = req.query;
 
       const query: any = { landlordId: new Types.ObjectId(userId) };
 
-      if (status) {
-        query.status = status;
-      }
+      applyLandlordConnectionListFilter(
+        query,
+        status as string | undefined,
+        includeDismissed === "true"
+      );
 
       if (propertyId) {
         query.propertyId = propertyId;
@@ -629,15 +697,46 @@ export class ConnectionController {
       connection.respondedAt = new Date();
       await connection.save();
 
+      const notifyTenantId = connection.tenantId.toString();
+      const notifyLandlordId = connection.landlordId.toString();
+      const notifyPropertyId = connection.propertyId.toString();
+      const notifyConnectionId = connection._id.toString();
+
+      await connection.populate([
+        { path: "propertyId", select: "title" },
+        { path: "landlordId", select: "firstName lastName" },
+      ]);
+
+      const propertyDoc = connection.propertyId as any;
+      const landlordUser = connection.landlordId as any;
+      const landlordName =
+        `${landlordUser?.firstName || ""} ${landlordUser?.lastName || ""}`.trim() || "Landlord";
+
+      try {
+        await appNotificationService.notify({
+          userId: notifyTenantId,
+          type: "connection_accepted",
+          title: "Rental request accepted",
+          body: `${landlordName} accepted your request for ${propertyDoc?.title || "the property"}`,
+          data: {
+            connectionId: notifyConnectionId,
+            propertyId: notifyPropertyId,
+            senderId: userId.toString(),
+          },
+        });
+      } catch (notifyErr) {
+        console.error("In-app notify (connection accepted):", notifyErr?.message || notifyErr);
+      }
+
       // Create chat and send initial message
       try {
         console.log("🔍 DEBUG: Creating chat for accepted connection");
         
         // Create or get chat between tenant and landlord
         const chat = await chatService.getOrCreateChat(
-          connection.tenantId,
-          connection.landlordId,
-          connection.propertyId
+          notifyTenantId,
+          notifyLandlordId,
+          notifyPropertyId
         );
 
         // Send initial message from landlord
@@ -645,14 +744,14 @@ export class ConnectionController {
         
         const initialMsg = await chatService.sendMessage({
           chatId: chat._id.toString(),
-          senderId: connection.landlordId.toString(),
+          senderId: notifyLandlordId,
           senderRole: "landlord",
           messageType: "text",
           content: initialMessage
         });
 
         emitChatMessageRealtime(req, chat._id.toString(), initialMsg, {
-          senderId: connection.landlordId.toString(),
+          senderId: notifyLandlordId,
         });
 
         console.log("🔍 DEBUG: Chat created and initial message sent successfully");
@@ -713,7 +812,38 @@ export class ConnectionController {
       connection.status = "rejected";
       connection.responseMessage = responseMessage || "Connection rejected";
       connection.respondedAt = new Date();
+      connection.isActive = false;
       await connection.save();
+
+      const notifyTenantId = connection.tenantId.toString();
+      const notifyPropertyId = connection.propertyId.toString();
+      const notifyConnectionId = connection._id.toString();
+
+      await connection.populate([
+        { path: "propertyId", select: "title" },
+        { path: "landlordId", select: "firstName lastName" },
+      ]);
+
+      const propertyDoc = connection.propertyId as any;
+      const landlordUser = connection.landlordId as any;
+      const landlordName =
+        `${landlordUser?.firstName || ""} ${landlordUser?.lastName || ""}`.trim() || "Landlord";
+
+      try {
+        await appNotificationService.notify({
+          userId: notifyTenantId,
+          type: "connection_rejected",
+          title: "Rental request declined",
+          body: `${landlordName} declined your request for ${propertyDoc?.title || "the property"}`,
+          data: {
+            connectionId: notifyConnectionId,
+            propertyId: notifyPropertyId,
+            senderId: userId.toString(),
+          },
+        });
+      } catch (notifyErr) {
+        console.error("In-app notify (connection rejected):", notifyErr?.message || notifyErr);
+      }
 
       res.status(200).json({
         success: true,
@@ -770,6 +900,190 @@ export class ConnectionController {
         success: true,
         message: "Connection cancelled successfully",
         data: connection
+      });
+    } catch (error: any) {
+      next(error);
+    }
+  }
+
+  /**
+   * Soft-dismiss a request from landlord list (accepted, withdrawn, or declined — not pending).
+   */
+  async dismissLandlordConnectionRequest(req: Request, res: Response, next: NextFunction) {
+    try {
+      const userId = (req as any).user._id;
+      const userRole = (req as any).user.role;
+      const { connectionId } = req.params;
+
+      if (userRole !== "landlord") {
+        return res.status(403).json({
+          success: false,
+          message: "Only landlords can dismiss connection requests",
+        });
+      }
+
+      if (!Types.ObjectId.isValid(connectionId)) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid connection ID",
+        });
+      }
+
+      const connection = await Connection.findById(connectionId);
+      if (!connection) {
+        return res.status(404).json({
+          success: false,
+          message: "Connection request not found",
+        });
+      }
+
+      if (connection.landlordId.toString() !== userId.toString()) {
+        return res.status(403).json({
+          success: false,
+          message: "You can only dismiss your own connection requests",
+        });
+      }
+
+      if (!LANDLORD_CLEARABLE_CONNECTION_STATUSES.includes(connection.status as any)) {
+        return res.status(400).json({
+          success: false,
+          message: "Pending requests cannot be cleared. Accept or decline first.",
+        });
+      }
+
+      connection.dismissedByLandlordAt = new Date();
+      await connection.save();
+
+      res.status(200).json({
+        success: true,
+        message: "Request removed from your list",
+        data: connection,
+      });
+    } catch (error: any) {
+      next(error);
+    }
+  }
+
+  /**
+   * Bulk-clear accepted, withdrawn, and declined landlord requests not yet dismissed.
+   */
+  async dismissAllLandlordClosedRequests(req: Request, res: Response, next: NextFunction) {
+    try {
+      const userId = (req as any).user._id;
+      const userRole = (req as any).user.role;
+
+      if (userRole !== "landlord") {
+        return res.status(403).json({
+          success: false,
+          message: "Only landlords can dismiss connection requests",
+        });
+      }
+
+      const result = await Connection.updateMany(
+        {
+          landlordId: userId,
+          status: { $in: [...LANDLORD_CLEARABLE_CONNECTION_STATUSES] },
+          $or: [{ dismissedByLandlordAt: { $exists: false } }, { dismissedByLandlordAt: null }],
+        },
+        { $set: { dismissedByLandlordAt: new Date() } }
+      );
+
+      res.status(200).json({
+        success: true,
+        message: "Requests cleared from your list",
+        data: { clearedCount: result.modifiedCount },
+      });
+    } catch (error: any) {
+      next(error);
+    }
+  }
+
+  /**
+   * Soft-dismiss a cancelled or rejected request from tenant list (tenant only)
+   */
+  async dismissConnectionRequest(req: Request, res: Response, next: NextFunction) {
+    try {
+      const userId = (req as any).user._id;
+      const userRole = (req as any).user.role;
+      const { connectionId } = req.params;
+
+      if (userRole !== "tenant") {
+        return res.status(403).json({
+          success: false,
+          message: "Only tenants can dismiss connection requests",
+        });
+      }
+
+      if (!Types.ObjectId.isValid(connectionId)) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid connection ID",
+        });
+      }
+
+      const connection = await Connection.findById(connectionId);
+      if (!connection) {
+        return res.status(404).json({
+          success: false,
+          message: "Connection request not found",
+        });
+      }
+
+      if (connection.tenantId.toString() !== userId.toString()) {
+        return res.status(403).json({
+          success: false,
+          message: "You can only dismiss your own connection requests",
+        });
+      }
+
+      if (!["cancelled", "rejected"].includes(connection.status)) {
+        return res.status(400).json({
+          success: false,
+          message: "Only cancelled or rejected requests can be dismissed",
+        });
+      }
+
+      connection.dismissedByTenantAt = new Date();
+      await connection.save();
+
+      res.status(200).json({
+        success: true,
+        message: "Connection request removed from your list",
+        data: connection,
+      });
+    } catch (error: any) {
+      next(error);
+    }
+  }
+
+  /**
+   * Bulk-dismiss all cancelled/rejected tenant requests not yet dismissed
+   */
+  async dismissAllWithdrawnRequests(req: Request, res: Response, next: NextFunction) {
+    try {
+      const userId = (req as any).user._id;
+      const userRole = (req as any).user.role;
+
+      if (userRole !== "tenant") {
+        return res.status(403).json({
+          success: false,
+          message: "Only tenants can dismiss connection requests",
+        });
+      }
+
+      const result = await Connection.updateMany(
+        {
+          tenantId: userId,
+          status: { $in: ["cancelled", "rejected"] },
+          $or: [{ dismissedByTenantAt: { $exists: false } }, { dismissedByTenantAt: null }],
+        },
+        { $set: { dismissedByTenantAt: new Date() } }
+      );
+
+      res.status(200).json({
+        success: true,
+        message: "Withdrawn and declined requests cleared from your list",
+        data: { clearedCount: result.modifiedCount },
       });
     } catch (error: any) {
       next(error);

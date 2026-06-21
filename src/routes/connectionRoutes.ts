@@ -14,15 +14,57 @@ router.post("/request",
   (req, res, next) => connectionController.sendConnectionRequest(req, res, next)
 );
 
-// Get connection requests for landlord
+// Get connection requests for landlord (Active inbox + History via ?status=)
 router.get("/landlord", 
+  authorize(["landlord"]),
   (req, res, next) => connectionController.getLandlordConnections(req, res, next)
+);
+
+// Landlord paginated requests (same filters as /landlord)
+router.get("/landlord/requests",
+  authorize(["landlord"]),
+  (req, res, next) => connectionController.getLandlordConnectionRequests(req, res, next)
 );
 
 // Get connection requests for tenant
 router.get("/tenant/requests", 
   authorize(["tenant"]), 
   (req, res, next) => connectionController.getTenantConnectionRequests(req, res, next)
+);
+
+// Tenant: clear all withdrawn/declined from History
+router.put("/tenant/clear-closed",
+  authorize(["tenant"]),
+  (req, res, next) => connectionController.dismissAllWithdrawnRequests(req, res, next)
+);
+
+// Tenant: clear one withdrawn/declined request
+router.put("/tenant/:connectionId/clear",
+  authorize(["tenant"]),
+  (req, res, next) => connectionController.dismissConnectionRequest(req, res, next)
+);
+
+// Landlord: clear all withdrawn/declined from History
+router.put("/landlord/clear-closed",
+  authorize(["landlord"]),
+  (req, res, next) => connectionController.dismissAllLandlordClosedRequests(req, res, next)
+);
+
+// Landlord: clear one withdrawn/declined request
+router.put("/landlord/:connectionId/clear",
+  authorize(["landlord"]),
+  (req, res, next) => connectionController.dismissLandlordConnectionRequest(req, res, next)
+);
+
+// Legacy tenant dismiss routes (aliases — prefer /tenant/clear-* above)
+router.put("/dismiss-withdrawn",
+  authorize(["tenant"]),
+  (req, res, next) => connectionController.dismissAllWithdrawnRequests(req, res, next)
+);
+
+router.put("/:connectionId/dismiss",
+  authorize(["tenant"]),
+  (req, res, next) => connectionController.dismissConnectionRequest(req, res, next)
 );
 
 // Accept connection request (landlord only)

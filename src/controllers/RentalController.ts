@@ -11,8 +11,11 @@ export class RentalController {
     try {
       const userId = (req as any).user._id;
       const userRole = (req as any).user.role;
+      const statusParam = (req.query.status as string) || "all";
+      const allowed = ["active", "ended", "suspended", "all"];
+      const statusFilter = allowed.includes(statusParam) ? statusParam : "all";
 
-      const rentals = await rentalService.getUserRentals(userId, userRole);
+      const rentals = await rentalService.getUserRentals(userId, userRole, statusFilter);
 
       res.status(200).json({
         success: true,

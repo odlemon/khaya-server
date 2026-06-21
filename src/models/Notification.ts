@@ -8,7 +8,20 @@ export type NotificationType =
   | "viewing_response"
   | "move_in_response"
   | "chat"
-  | "system";
+  | "system"
+  | "connection_request"
+  | "connection_accepted"
+  | "connection_rejected"
+  | "connection_cancelled"
+  | "property_submitted"
+  | "property_verified"
+  | "property_rejected"
+  | "agreement_created"
+  | "agreement_signed"
+  | "agreement_completed"
+  | "payment_received"
+  | "maintenance_request"
+  | "maintenance_update";
 
 export interface INotificationData {
   chatId?: string;
@@ -50,6 +63,19 @@ const notificationSchema = new Schema<INotification>(
         "move_in_response",
         "chat",
         "system",
+        "connection_request",
+        "connection_accepted",
+        "connection_rejected",
+        "connection_cancelled",
+        "property_submitted",
+        "property_verified",
+        "property_rejected",
+        "agreement_created",
+        "agreement_signed",
+        "agreement_completed",
+        "payment_received",
+        "maintenance_request",
+        "maintenance_update",
       ],
       required: true,
     },

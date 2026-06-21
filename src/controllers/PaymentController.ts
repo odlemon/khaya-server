@@ -4,9 +4,11 @@ import { paymentService } from "../services/PaymentService";
 import { paymentRequestService } from "../services/PaymentRequestService";
 import { CommissionService } from "../services/CommissionService";
 import { transactionService } from "../services/TransactionService";
-import { paynowService } from "../services/PaynowService";
+import { paymentGatewayService } from "../services/PaymentGatewayService";
+import { buildGatewayPaymentFields } from "../utils/paymentGatewayFields";
 import { Payment } from "../models/Payment";
 import { Rental } from "../models/Rental";
+import { assertRentalAcceptsTenantPayments } from "../utils/rentalCapabilities";
 import { Types } from "mongoose";
 
 const commissionService = new CommissionService();
@@ -72,13 +74,21 @@ export class PaymentController {
         });
       }
 
-      // Paynow mobile money payment
-      if (paymentData.paymentMethod === "paynow" || paymentData.phone) {
+      // Online mobile money payment (ContiPay EcoCash / legacy PayNow)
+      const isOnlineGateway =
+        paymentData.paymentMethod === "contipay" ||
+        paymentData.paymentMethod === "paynow" ||
+        paymentData.phone;
+
+      if (isOnlineGateway) {
         const phone = paymentData.phone;
         const method = paymentData.mobileMethod || "ecocash";
 
         if (!phone) {
-          return res.status(400).json({ success: false, message: "Phone number is required for Paynow payments" });
+          return res.status(400).json({
+            success: false,
+            message: "Phone number is required for EcoCash online payments",
+          });
         }
 
         const rental = await Rental.findById(rentalId);
@@ -86,17 +96,32 @@ export class PaymentController {
           return res.status(404).json({ success: false, message: "Rental not found" });
         }
 
-        const reference = paynowService.generateReference("RENT", userId);
+        try {
+          assertRentalAcceptsTenantPayments(rental);
+        } catch (err: any) {
+          return res.status(400).json({ success: false, message: err.message });
+        }
 
-        // Find pending invoice
+        const reference = paymentGatewayService.generateReference("RENT", userId);
+
         const { Invoice } = await import("../models/Invoice");
         const pendingInvoice = await Invoice.findOne({
           rentalId: rental._id,
           tenantId: new Types.ObjectId(userId),
-          status: { $in: ["pending", "partially_paid", "overdue"] }
+          status: { $in: ["pending", "partially_paid", "overdue"] },
         }).sort({ dueDate: 1 });
 
-        // Create pending payment record
+        const scheduledPayment = await Payment.findOne({
+          rentalId: rental._id,
+          paymentType: "rent",
+          status: "pending",
+        }).sort({ dueDate: 1 });
+
+        const paymentAmount = scheduledPayment?.amount ?? paymentData.amount;
+        const paymentMetadata = scheduledPayment?.metadata;
+
+        const gatewayMeta = { paymentPurpose: "rent" };
+
         const pendingPayment = await Payment.create({
           rentalId: rental._id,
           agreementId: rental.agreementId,
@@ -105,77 +130,60 @@ export class PaymentController {
           landlordId: rental.landlordId,
           tenantId: rental.tenantId,
           paymentType: paymentData.paymentType || "rent",
-          amount: paymentData.amount,
-          totalAmount: paymentData.amount,
+          amount: paymentAmount,
+          totalAmount: paymentAmount,
           dueDate: new Date(),
           paymentMethod: "in_app",
           status: "pending",
           notes: paymentData.notes,
-          pollUrl: null,
-          paynowReference: reference,
-          paynowMetadata: { paymentPurpose: "rent" }
+          ...(paymentMetadata ? { metadata: paymentMetadata } : {}),
+          ...buildGatewayPaymentFields(reference, gatewayMeta),
         });
 
-        // Initiate Paynow payment
-        const paynowResult = await paynowService.initiateMobilePayment({
+        const gatewayResult = await paymentGatewayService.initiateMobilePayment({
           reference,
           description: `Rent payment for ${rental.propertyId}`,
-          amount: paymentData.amount,
+          amount: paymentAmount,
           phone,
           method,
-          email: paymentData.email
+          email: paymentData.email,
+          firstName: paymentData.firstName,
+          lastName: paymentData.lastName,
         });
 
-        if (!paynowResult.success) {
+        if (!gatewayResult.success) {
           pendingPayment.status = "cancelled";
-          pendingPayment.rejectionReason = paynowResult.error;
+          pendingPayment.rejectionReason = gatewayResult.error;
           await pendingPayment.save();
-          return res.status(400).json({ success: false, message: paynowResult.error || "Payment initiation failed" });
+          return res.status(400).json({
+            success: false,
+            message: gatewayResult.error || "Payment initiation failed",
+          });
         }
 
-        pendingPayment.pollUrl = paynowResult.pollUrl;
-        await pendingPayment.save();
+        if (gatewayResult.pollUrl) {
+          pendingPayment.pollUrl = gatewayResult.pollUrl;
+          await pendingPayment.save();
+        }
 
         return res.status(201).json({
           success: true,
-          message: "Payment initiated. Check your phone for payment instructions.",
+          message: "Payment initiated. Check your phone for EcoCash payment instructions.",
           data: {
             paymentId: pendingPayment._id,
             reference,
-            pollUrl: paynowResult.pollUrl,
-            instructions: paynowResult.instructions,
-            statusCheckUrl: `/api/webhooks/payment-status/${pendingPayment._id}`
-          }
+            pollUrl: gatewayResult.pollUrl || null,
+            instructions: gatewayResult.instructions,
+            statusCheckUrl: `/api/webhooks/payment-status/${pendingPayment._id}`,
+            gateway: paymentGatewayService.provider,
+          },
         });
       }
 
-      // Legacy online payment (in_app with gatewayResponse) - process immediately
-      if (!paymentData.gatewayResponse) {
-        return res.status(400).json({
-          success: false,
-          message: "Gateway response or phone number is required for online payments"
-        });
-      }
-
-      const payment = await paymentService.createNewPayment(rentalId, userId, {
-        ...paymentData,
-        paymentMethod: "in_app"
-      });
-
-      const { EscrowTransaction } = await import("../models/Escrow");
-      const escrowTransaction = await EscrowTransaction.findOne({ paymentId: payment._id });
-
-      const { RevenueSource } = await import("../models/RevenueSource");
-      const revenueSources = await RevenueSource.find({ paymentId: payment._id });
-
-      res.json({
-        success: true,
-        message: "Payment processed successfully and added to escrow",
-        data: {
-          payment,
-          escrowTransaction,
-          revenueSources
-        }
+      return res.status(400).json({
+        success: false,
+        message:
+          "Phone number is required for online payments. Send paymentMethod 'contipay' (or 'paynow') and phone in the request body.",
       });
     } catch (error) {
       next(error);

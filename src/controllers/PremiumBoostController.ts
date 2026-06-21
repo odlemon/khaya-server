@@ -1,7 +1,8 @@
 // @ts-nocheck
 import { Request, Response } from "express";
 import { premiumBoostService } from "../services/PremiumBoostService";
-import { paynowService } from "../services/PaynowService";
+import { paymentGatewayService } from "../services/PaymentGatewayService";
+import { buildGatewayPaymentFields } from "../utils/paymentGatewayFields";
 import { emailNotificationService } from "../services/EmailNotificationService";
 import { Payment } from "../models/Payment";
 import { User } from "../models/User";
@@ -19,7 +20,7 @@ export class PremiumBoostController {
       // req.user is the full User document with _id field (MongoDB ObjectId)
       const landlordId = (req as any).user?._id?.toString() || (req as any).user?._id || (req as any).user?.id || (req as any).user?.userId;
       const { propertyId } = req.params;
-      const { duration, paymentMethod, gatewayResponse } = req.body;
+      const { duration, paymentMethod } = req.body;
 
       if (!duration || !paymentMethod) {
         res.status(400).json({
@@ -42,65 +43,68 @@ export class PremiumBoostController {
         return;
       }
 
-      // Paynow mobile money path
       const { phone, mobileMethod } = req.body;
-      if (phone) {
-        const priceMap: Record<number, number> = { 7: 5, 30: 15, 90: 35 };
-        const price = priceMap[duration] || 15;
-        const reference = paynowService.generateReference("BOOST", landlordId);
-
-        const pendingPayment = await Payment.create({
-          rentalId: null, agreementId: null,
-          propertyId: new Types.ObjectId(propertyId),
-          landlordId: new Types.ObjectId(landlordId),
-          tenantId: new Types.ObjectId(landlordId),
-          paymentType: "service",
-          amount: price, totalAmount: price,
-          paymentMethod: "in_app", status: "pending",
-          notes: `Premium boost - ${duration} days`,
-          paynowReference: reference,
-          paynowMetadata: { paymentPurpose: "premium_boost", duration, propertyId }
-        });
-
-        const paynowResult = await paynowService.initiateMobilePayment({
-          reference, description: `Premium boost ${duration} days`,
-          amount: price, phone, method: mobileMethod || "ecocash"
-        });
-
-        if (!paynowResult.success) {
-          pendingPayment.status = "cancelled";
-          pendingPayment.rejectionReason = paynowResult.error;
-          await pendingPayment.save();
-          res.status(400).json({ success: false, message: paynowResult.error || "Payment initiation failed" });
-          return;
-        }
-
-        pendingPayment.pollUrl = paynowResult.pollUrl;
-        await pendingPayment.save();
-
-        res.status(201).json({
-          success: true,
-          message: "Boost payment initiated. Check your phone.",
-          data: {
-            paymentId: pendingPayment._id, reference,
-            pollUrl: paynowResult.pollUrl, instructions: paynowResult.instructions,
-            statusCheckUrl: `/api/webhooks/payment-status/${pendingPayment._id}`
-          }
+      if (!phone) {
+        res.status(400).json({
+          success: false,
+          message: "Phone number is required for EcoCash online payments",
         });
         return;
       }
 
-      // Legacy gatewayResponse path
-      if (!gatewayResponse) {
-        res.status(400).json({ success: false, message: "Phone number or gateway response required for payment" });
-        return;
-      }
+      const priceMap: Record<number, number> = { 7: 5, 30: 15, 90: 35 };
+      const price = priceMap[duration] || 15;
+      const reference = paymentGatewayService.generateReference("BOOST", landlordId);
+      const gatewayMeta = { paymentPurpose: "premium_boost", duration, propertyId };
 
-      const result = await premiumBoostService.purchaseBoost({
-        propertyId, landlordId, duration, paymentMethod: "in_app", gatewayResponse
+      const pendingPayment = await Payment.create({
+        rentalId: null,
+        agreementId: null,
+        propertyId: new Types.ObjectId(propertyId),
+        landlordId: new Types.ObjectId(landlordId),
+        tenantId: new Types.ObjectId(landlordId),
+        paymentType: "service",
+        amount: price,
+        totalAmount: price,
+        paymentMethod: "in_app",
+        status: "pending",
+        notes: `Premium boost - ${duration} days`,
+        ...buildGatewayPaymentFields(reference, gatewayMeta),
       });
 
-      res.status(200).json({ success: true, message: "Premium boost purchased successfully", data: result });
+      const gatewayResult = await paymentGatewayService.initiateMobilePayment({
+        reference,
+        description: `Premium boost ${duration} days`,
+        amount: price,
+        phone,
+        method: mobileMethod || "ecocash",
+      });
+
+      if (!gatewayResult.success) {
+        pendingPayment.status = "cancelled";
+        pendingPayment.rejectionReason = gatewayResult.error;
+        await pendingPayment.save();
+        res.status(400).json({ success: false, message: gatewayResult.error || "Payment initiation failed" });
+        return;
+      }
+
+      if (gatewayResult.pollUrl) {
+        pendingPayment.pollUrl = gatewayResult.pollUrl;
+        await pendingPayment.save();
+      }
+
+      res.status(201).json({
+        success: true,
+        message: "Boost payment initiated. Check your phone.",
+        data: {
+          paymentId: pendingPayment._id,
+          reference,
+          pollUrl: gatewayResult.pollUrl || null,
+          instructions: gatewayResult.instructions,
+          statusCheckUrl: `/api/webhooks/payment-status/${pendingPayment._id}`,
+          gateway: paymentGatewayService.provider,
+        },
+      });
     } catch (error: any) {
       console.error("Error purchasing boost:", error);
       res.status(500).json({

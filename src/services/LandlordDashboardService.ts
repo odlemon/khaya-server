@@ -9,6 +9,7 @@ import { EscrowTransaction } from "../models/Escrow";
 import { LandlordPreferences } from "../models/LandlordPreferences";
 import { RevenueSource } from "../models/RevenueSource";
 import { landlordSubscriptionService } from "./LandlordSubscriptionService";
+import { enrichRentalsForApi } from "../utils/enrichRentalResponse";
 import { Types } from "mongoose";
 
 export class LandlordDashboardService {
@@ -24,6 +25,7 @@ export class LandlordDashboardService {
         balance,
         totalProperties,
         activeRentals,
+        pastRentals,
         totalAgreements,
         recentPayments,
         paymentStats,
@@ -34,6 +36,7 @@ export class LandlordDashboardService {
         this.getLandlordBalance(landlordId),
         this.getTotalProperties(landlordId),
         this.getActiveRentals(landlordId),
+        this.getPastRentals(landlordId),
         this.getTotalAgreements(landlordId),
         this.getRecentPayments(landlordId),
         this.getPaymentStats(landlordId),
@@ -57,6 +60,7 @@ export class LandlordDashboardService {
         properties: {
           total: totalProperties,
           activeRentals: activeRentals.length,
+          pastRentals: pastRentals.length,
           totalAgreements: totalAgreements
         },
 
@@ -88,7 +92,8 @@ export class LandlordDashboardService {
         // Recent activity
         recentActivity: {
           recentPayments: recentPayments.slice(0, 10),
-          activeRentals: activeRentals.slice(0, 5)
+          activeRentals: activeRentals.slice(0, 5),
+          pastRentals: pastRentals.slice(0, 5),
         },
 
         // Statistics
@@ -155,6 +160,22 @@ export class LandlordDashboardService {
   }
 
   /**
+   * Past (ended/suspended) rentals for landlord profile history
+   */
+  private async getPastRentals(landlordId: string): Promise<any[]> {
+    const rentals = await Rental.find({
+      landlordId: new Types.ObjectId(landlordId),
+      status: { $in: ["ended", "suspended"] },
+    })
+      .populate("tenantId", "firstName lastName email phoneNumber")
+      .populate("propertyId", "title address images")
+      .populate("agreementId", "status terminatedAt startDate endDate")
+      .sort({ endedAt: -1, updatedAt: -1 });
+
+    return enrichRentalsForApi(rentals);
+  }
+
+  /**
    * Get total agreements
    */
   private async getTotalAgreements(landlordId: string): Promise<number> {
@@ -178,12 +199,18 @@ export class LandlordDashboardService {
   private async getPaymentStats(landlordId: string): Promise<any> {
     const payments = await Payment.find({ landlordId: new Types.ObjectId(landlordId) });
 
-    const onlinePayments = payments.filter(p => p.paymentMethod === "in_app");
-    const cashPayments = payments.filter(p => p.paymentMethod === "cash");
+    // Only count money actually received — not scheduled pending installments
+    const earnedPayments = payments.filter((p) => p.status === "verified");
+    const onlinePayments = earnedPayments.filter((p) => p.paymentMethod === "in_app");
+    const cashPayments = earnedPayments.filter((p) => p.paymentMethod === "cash");
 
-    const totalEarnings = payments.reduce((sum, p) => sum + (p.totalAmount || p.amount), 0);
+    const totalEarnings = earnedPayments.reduce((sum, p) => sum + (p.totalAmount || p.amount), 0);
     const onlineEarnings = onlinePayments.reduce((sum, p) => sum + (p.totalAmount || p.amount), 0);
     const cashEarnings = cashPayments.reduce((sum, p) => sum + (p.totalAmount || p.amount), 0);
+
+    const scheduledPending = payments.filter(
+      (p) => p.status === "pending" && p.paymentType === "rent"
+    ).length;
 
     return {
       totalEarnings,
@@ -193,10 +220,11 @@ export class LandlordDashboardService {
       cashPayments: cashPayments.length,
       averageOnlinePayment: onlinePayments.length > 0 ? onlineEarnings / onlinePayments.length : 0,
       averageCashPayment: cashPayments.length > 0 ? cashEarnings / cashPayments.length : 0,
-      totalTransactions: payments.length,
-      verifiedTransactions: payments.filter(p => p.status === "verified").length,
-      pendingTransactions: payments.filter(p => p.status === "paid").length,
-      overdueTransactions: payments.filter(p => p.status === "overdue").length
+      totalTransactions: earnedPayments.length,
+      verifiedTransactions: earnedPayments.length,
+      pendingTransactions: payments.filter((p) => p.status === "paid").length,
+      overdueTransactions: payments.filter((p) => p.status === "overdue").length,
+      scheduledPendingInstallments: scheduledPending,
     };
   }
 

@@ -11,6 +11,31 @@ import { favoriteService } from "../services/FavoriteService";
 import { Favorite } from "../models/Favorite";
 import { Types } from "mongoose";
 import { insuranceService } from "../services/InsuranceService";
+import { appNotificationService } from "../services/AppNotificationService";
+import { excludeActivelyRentedProperties } from "../utils/propertySearch";
+
+async function notifyAdminsPropertySubmitted(property: any, landlordId: string): Promise<void> {
+  if (property.status !== "published" || property.isVerified) {
+    return;
+  }
+  const title = property.title || property.address || "New listing";
+  try {
+    await appNotificationService.notifyAdmins(
+      () => ({
+        type: "property_submitted",
+        title: "Listing awaiting verification",
+        body: `New property submitted for review: ${title}`,
+        data: {
+          propertyId: property._id.toString(),
+          senderId: landlordId,
+        },
+      }),
+      landlordId
+    );
+  } catch (err) {
+    console.error("In-app notify (property submitted):", err?.message || err);
+  }
+}
 
 export class PropertyController {
 
@@ -56,6 +81,10 @@ export class PropertyController {
 
       const property = new Property(propertyData);
       const savedProperty = await property.save();
+
+      if (savedProperty.status === "published") {
+        await notifyAdminsPropertySubmitted(savedProperty, userId.toString());
+      }
 
       res.status(201).json({ 
         success: true, 
@@ -146,6 +175,10 @@ export class PropertyController {
       // City filter
       if (city) {
         query["address.city"] = { $regex: city, $options: "i" };
+      }
+
+      if (status === "published") {
+        await excludeActivelyRentedProperties(query);
       }
 
       const skip = (Number(page) - 1) * Number(limit);
@@ -749,6 +782,10 @@ export class PropertyController {
       property.status = status;
       await property.save();
 
+      if (status === "published") {
+        await notifyAdminsPropertySubmitted(property, property.landlordId.toString());
+      }
+
       res.status(200).json({ 
         success: true, 
         message: `Property status updated to ${status}`, 
@@ -835,14 +872,17 @@ export class PropertyController {
       }
       
       // Get properties with active boosts (or fallback to isFeatured: true)
-      let properties = await Property.find({ 
+      const featuredQuery: any = {
         status: "published",
         isVerified: true,
         $or: [
           { _id: { $in: featuredPropertyIds } },
           { isFeatured: true }
         ]
-      })
+      };
+      await excludeActivelyRentedProperties(featuredQuery);
+
+      let properties = await Property.find(featuredQuery)
         .populate("landlordId", "firstName lastName email phone")
         .sort({ createdAt: -1 })
         .limit(Number(limit));
@@ -985,6 +1025,8 @@ export class PropertyController {
       if (otherFilters.zeroDepositAvailable !== undefined) query.zeroDepositAvailable = otherFilters.zeroDepositAvailable === "true";
       if (otherFilters.city) query["address.city"] = { $regex: otherFilters.city, $options: "i" };
 
+      await excludeActivelyRentedProperties(query);
+
       const skip = (Number(page) - 1) * Number(limit);
       
       let properties = await Property.find(query)
@@ -1026,9 +1068,9 @@ export class PropertyController {
       // Filter by connection status if specified
       if (connectionStatus) {
         if (connectionStatus === "none") {
-          properties = properties.filter(p => !p.connectionStatus);
+          properties = properties.filter(p => p.connectionState === "none");
         } else {
-          properties = properties.filter(p => p.connectionStatus?.status === connectionStatus);
+          properties = properties.filter(p => p.connectionState === connectionStatus);
         }
       }
 
@@ -1068,7 +1110,7 @@ export class PropertyController {
         });
       }
 
-      const properties = await Property.find({
+      const nearbyQuery: any = {
         status: "published",
         "address.coordinates": {
           $near: {
@@ -1079,7 +1121,10 @@ export class PropertyController {
             $maxDistance: Number(radius)
           }
         }
-      })
+      };
+      await excludeActivelyRentedProperties(nearbyQuery);
+
+      const properties = await Property.find(nearbyQuery)
         .populate("landlordId", "firstName lastName")
         .limit(Number(limit));
 
@@ -1366,6 +1411,18 @@ export class PropertyController {
       property.adminFeedback = (req.body?.adminFeedback) || undefined;
       await property.save();
 
+      try {
+        await appNotificationService.notify({
+          userId: property.landlordId.toString(),
+          type: "property_verified",
+          title: "Listing verified",
+          body: `Your property "${property.title || property.address}" is now verified and live`,
+          data: { propertyId: property._id.toString() },
+        });
+      } catch (notifyErr) {
+        console.error("In-app notify (property verified):", notifyErr?.message || notifyErr);
+      }
+
       const propertyData = property.toObject();
       propertyData.verificationStatus = "verified";
 
@@ -1416,6 +1473,18 @@ export class PropertyController {
         property.adminFeedback = adminFeedback;
       }
       await property.save();
+
+      try {
+        await appNotificationService.notify({
+          userId: property.landlordId.toString(),
+          type: "property_rejected",
+          title: "Listing rejected",
+          body: `Your property "${property.title || property.address}" was not approved: ${rejectionReason}`,
+          data: { propertyId: property._id.toString() },
+        });
+      } catch (notifyErr) {
+        console.error("In-app notify (property rejected):", notifyErr?.message || notifyErr);
+      }
 
       const propertyData = property.toObject();
       propertyData.verificationStatus = "rejected";

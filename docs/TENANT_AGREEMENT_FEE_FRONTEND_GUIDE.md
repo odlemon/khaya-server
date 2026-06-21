@@ -2,39 +2,46 @@
 
 ## Overview
 
-When a tenant signs a rental agreement, they must pay a **one-time Agreement Processing Fee** (USD 30-50). This fee covers:
+When a tenant signs a rental agreement, a **one-time Agreement Processing Fee** (USD 30–50) applies. By default the fee is **deferred to the first rent installment** — tenants sign without paying upfront.
+
+The fee covers:
 - Digital lease contract creation
 - E-signature processing
 - Agreement digitalization
 
 The fee amount depends on the property value:
-- **Low/Medium Value Properties**: USD 30-40
+- **Low/Medium Value Properties**: USD 30–40
 - **High Value Properties** (over USD 100,000): USD 50
 
-Tenants can pay this fee using **2 payment methods**:
-- **Online Payment** - Pay directly via payment gateway (instant processing)
-- **External Payment** - Pay outside platform, upload proof, admin reviews and approves
+**Default flow:** Sign → first rent payment = rent + insurance (if any) + agreement fee.
+
+**Legacy optional flow:** Pay fee upfront via online (`POST /api/agreements/:id/pay-fee`) or external payment request before or after signing.
 
 ---
 
 ## Payment Flow
 
-### Flow 1: Online Payment (In-App)
+### Flow 1: Deferred Fee (Default — First Rent)
 
 ```
-1. Tenant signs agreement
-2. System calculates agreement fee based on property value
-3. Tenant selects "Pay Online"
-4. Frontend integrates with payment gateway
-5. Payment gateway processes payment
-6. On success, frontend calls API with gateway response
-7. Agreement fee payment processed immediately
-8. Revenue source created (status: "collected")
-9. Agreement status updated
-10. Tenant sees confirmation
+1. Landlord signs agreement
+2. Tenant signs (no payment required; paymentStatus: "deferred")
+3. Agreement status → "signed"; rental created
+4. First scheduled rent payment includes agreement fee
+5. Tenant pays first installment
+6. agreement_fee revenue created; agreementFeeStatus → "charged"
 ```
 
-### Flow 2: External Payment (Deposit)
+### Flow 2: Online Upfront Payment (Legacy)
+
+```
+1. Tenant optionally pays fee before signing
+2. POST /api/agreements/:id/pay-fee
+3. agreementFeeStatus → "charged"; fee NOT added to first rent
+4. Tenant signs; paymentStatus → "verified"
+```
+
+### Flow 3: External Payment (Deposit)
 
 ```
 1. Tenant signs agreement
@@ -59,11 +66,9 @@ Tenants can pay this fee using **2 payment methods**:
 
 ## API Endpoints
 
-### 1. Pay Agreement Fee Online (In-App Payment)
+### 1. Pay Agreement Fee Online (Optional Upfront)
 
-**⚠️ Note:** This endpoint needs to be implemented. For now, use the payment request flow for all agreement fee payments.
-
-**Endpoint (To Be Implemented):**
+**Endpoint:**
 ```
 POST /api/agreements/:agreementId/pay-fee
 Authorization: Bearer <tenant_token>

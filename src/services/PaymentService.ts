@@ -3,11 +3,14 @@ import { Payment, IPayment } from "../models/Payment";
 import { LandlordBalance } from "../models/LandlordBalance";
 import { Withdrawal } from "../models/Withdrawal";
 import { Rental } from "../models/Rental";
+import { assertRentalAcceptsTenantPayments } from "../utils/rentalCapabilities";
 import { CommissionService } from "./CommissionService";
 import { escrowService } from "./EscrowService";
 import { paymentCalculationService } from "./PaymentCalculationService";
 import { revenueSourceService } from "./RevenueSourceService";
+import { agreementFeeService } from "./AgreementFeeService";
 import { emailNotificationService } from "./EmailNotificationService";
+import { appNotificationService } from "./AppNotificationService";
 import { User } from "../models/User";
 import { Property } from "../models/Property";
 import { Types } from "mongoose";
@@ -43,6 +46,8 @@ class PaymentService {
     if (tenantIdStr !== userIdStr) {
       throw new Error("Access denied");
     }
+
+    assertRentalAcceptsTenantPayments(rental);
     
     // Validate amount
     if (!data.amount || data.amount <= 0) {
@@ -148,17 +153,28 @@ class PaymentService {
       const { logger } = await import("../utils/logger");
       logger.warn(`⚠️ No invoice found for rent payment ${newPayment._id} on rental ${rentalId}`);
     }
+
+    const isRentPayment = (data.paymentType || "rent") === "rent";
+    let rentAmountForDeductions = data.amount;
+    const revenueSourceIds: string[] = [];
+
+    if (isRentPayment) {
+      const feeResult = await agreementFeeService.prepareRentPaymentForEscrow(newPayment, rental);
+      rentAmountForDeductions = feeResult.rentAmountForDeductions;
+      if (feeResult.agreementFeeRevenueSourceId) {
+        revenueSourceIds.push(feeResult.agreementFeeRevenueSourceId);
+      }
+    }
     
-    // Calculate deductions before adding to escrow
+    // Calculate deductions before adding to escrow (rent portion only when fee is bundled)
     const deductions = await paymentCalculationService.calculateRentDeductions(
-      data.amount,
+      rentAmountForDeductions,
       userId,
       rental.landlordId.toString(),
       rentalId
     );
 
     // Create revenue source records
-    const revenueSourceIds: string[] = [];
     
     if (deductions.subscriptionFee > 0) {
       const subRev = await revenueSourceService.createRevenueSource({
@@ -257,6 +273,21 @@ class PaymentService {
           netRentAmount: deductions.netRentAmount,
           propertyTitle: property.title || property.address
         });
+
+        try {
+          await appNotificationService.notify({
+            userId: rental.landlordId.toString(),
+            type: "payment_received",
+            title: "Rent payment received",
+            body: `${tenant ? `${tenant.firstName} ${tenant.lastName}` : "Tenant"} paid $${data.amount} for ${property.title || property.address}`,
+            data: {
+              propertyId: rental.propertyId.toString(),
+              rentalId: rentalId.toString(),
+            },
+          });
+        } catch (notifyErr) {
+          console.error("In-app notify (payment received):", notifyErr?.message || notifyErr);
+        }
       }
     } catch (emailError) {
       console.error("Error sending email notifications:", emailError);
@@ -316,17 +347,29 @@ class PaymentService {
     payment.paymentDate = new Date();
     payment.utilityReceipts = data.utilityReceipts || [];
     payment.notes = data.notes;
+
+    const rental = await Rental.findById(payment.rentalId);
+    if (!rental) {
+      throw new Error("Rental not found");
+    }
+
+    let rentAmountForDeductions = data.amount;
+    const revenueSourceIds: string[] = [];
+    const feeResult = await agreementFeeService.prepareRentPaymentForEscrow(payment, rental);
+    rentAmountForDeductions = feeResult.rentAmountForDeductions;
+    if (feeResult.agreementFeeRevenueSourceId) {
+      revenueSourceIds.push(feeResult.agreementFeeRevenueSourceId);
+    }
     
-    // Calculate deductions
+    // Calculate deductions (rent portion only when fee is bundled)
     const deductions = await paymentCalculationService.calculateRentDeductions(
-      data.amount,
+      rentAmountForDeductions,
       userId,
       payment.landlordId.toString(),
       payment.rentalId.toString()
     );
 
     // Create revenue source records
-    const revenueSourceIds: string[] = [];
     
     if (deductions.subscriptionFee > 0) {
       const subRev = await revenueSourceService.createRevenueSource({

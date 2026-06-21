@@ -70,6 +70,28 @@ export function addMonths(date: Date, months: number): Date {
   return result;
 }
 
+/**
+ * Number of monthly rent installments for a lease (always uses real calendar months).
+ */
+export function countLeaseMonthlyPayments(leaseStart: Date, leaseEnd: Date): number {
+  const start = new Date(leaseStart);
+  const end = new Date(leaseEnd);
+  if (end < start) return 1;
+
+  let count = 0;
+  const cursor = new Date(start);
+  const maxPayments = 120; // 10-year cap
+
+  while (cursor <= end && count < maxPayments) {
+    count++;
+    const next = new Date(cursor);
+    next.setMonth(next.getMonth() + 1);
+    cursor.setTime(next.getTime());
+  }
+
+  return Math.max(1, count);
+}
+
 
 
 

@@ -17,17 +17,21 @@ All payments go to **escrow** first, then are distributed to landlords and Khaya
 
 ## Payment Flow
 
-### Flow 1: Online Payment (In-App)
+### Flow 1: Online Payment (EcoCash via ContiPay)
 
 ```
-1. Tenant selects "Pay Online"
-2. Frontend integrates with payment gateway
-3. Payment gateway processes payment
-4. On success, frontend calls API with gateway response
-5. Payment goes directly to escrow (status: "verified")
-6. Deductions calculated (subscription fee, processing fee, insurance)
-7. Tenant sees confirmation immediately
+1. Tenant selects "Pay Online" and enters EcoCash phone number
+2. Frontend calls POST /api/payments/rental/:rentalId/create with phone + amount
+3. Backend initiates ContiPay EcoCash USSD push to tenant's phone
+4. Tenant enters PIN on phone
+5. ContiPay webhook confirms payment to backend
+6. Frontend polls GET /api/webhooks/payment-status/:paymentId until paid: true
+7. Payment goes to escrow (status: "verified")
+8. Deductions calculated (subscription fee, processing fee, insurance)
+9. Tenant sees confirmation
 ```
+
+See [CONTIPAY_INTEGRATION.md](./CONTIPAY_INTEGRATION.md) for full gateway details.
 
 ### Flow 2: External Payment (Deposit)
 
@@ -67,35 +71,44 @@ Authorization: Bearer <tenant_token>
 ```json
 {
   "amount": 500,
-  "paymentMethod": "in_app",
+  "paymentMethod": "contipay",
   "paymentType": "rent",
-  "gatewayResponse": {
-    "provider": "paystack",
-    "transactionId": "TXN123456",
-    "transactionRef": "REF789012",
-    "paidAt": "2025-01-15T10:30:00.000Z",
-    "rawResponse": {
-      "status": "success",
-      "message": "Transaction successful"
-    }
-  },
+  "phone": "0771234567",
   "notes": "Rent for January 2025"
 }
 ```
 
 **Field Descriptions:**
 - `amount` (required) - Payment amount
-- `paymentMethod` (required) - Must be `"in_app"` for online payments
+- `phone` (required) - EcoCash number (`077...` or `26377...`)
+- `paymentMethod` (optional) - `"contipay"` or `"paynow"`
 - `paymentType` (optional) - Default: `"rent"`
-- `gatewayResponse` (required) - Payment gateway response after successful payment
 - `notes` (optional) - Additional notes
 
-**Response (Success):**
+**Response (Initiated — poll for completion):**
 ```json
 {
   "success": true,
-  "message": "Payment processed successfully and added to escrow",
+  "message": "Payment initiated. Check your phone for EcoCash payment instructions.",
   "data": {
+    "paymentId": "payment_123",
+    "reference": "RENT-userId-1234567890",
+    "instructions": "Please check your phone for the EcoCash payment prompt...",
+    "statusCheckUrl": "/api/webhooks/payment-status/payment_123",
+    "gateway": "contipay"
+  }
+}
+```
+
+Poll `GET /api/webhooks/payment-status/:paymentId` until `data.paid === true`. See [CONTIPAY_INTEGRATION.md](./CONTIPAY_INTEGRATION.md).
+
+**Response (Completed — after poll):**
+```json
+{
+  "success": true,
+  "data": {
+    "paid": true,
+    "status": "completed",
     "payment": {
       "_id": "payment_123",
       "rentalId": "rental_123",

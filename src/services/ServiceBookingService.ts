@@ -2,6 +2,7 @@
 import { ServiceBooking, IServiceBooking } from "../models/ServiceBooking";
 import { ServiceReminder, IServiceReminder } from "../models/ServiceReminder";
 import { Rental } from "../models/Rental";
+import { assertRentalAcceptsNewBookings } from "../utils/rentalCapabilities";
 import mongoose from "mongoose";
 
 class ServiceBookingService {
@@ -53,6 +54,8 @@ class ServiceBookingService {
       console.log("  - tenantIdStr !== userIdStr:", tenantIdStr !== userIdStr);
       throw new Error("You are not authorized to book services for this rental");
     }
+
+    assertRentalAcceptsNewBookings(rental);
     
     console.log("✅ Authorization passed");
     
