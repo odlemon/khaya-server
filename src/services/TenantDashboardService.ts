@@ -8,6 +8,7 @@ import { MaintenanceRequest } from "../models/MaintenanceRequest";
 import { Chat } from "../models/Chat";
 import { Property } from "../models/Property";
 import { rentalReminderService } from "./RentalReminderService";
+import { enrichRentalsForApi } from "../utils/enrichRentalResponse";
 import { Types } from "mongoose";
 
 export class TenantDashboardService {
@@ -18,6 +19,7 @@ export class TenantDashboardService {
     try {
       const [
         currentRental,
+        pastRentals,
         paymentStats,
         serviceStats,
         maintenanceStats,
@@ -26,6 +28,7 @@ export class TenantDashboardService {
         reminderInfo
       ] = await Promise.all([
         this.getCurrentRental(tenantId),
+        this.getPastRentals(tenantId),
         this.getPaymentStats(tenantId),
         this.getServiceStats(tenantId),
         this.getMaintenanceStats(tenantId),
@@ -43,6 +46,8 @@ export class TenantDashboardService {
           nextPaymentDue: currentRental.nextPaymentDue,
           status: currentRental.status
         } : null,
+
+        pastRentals,
 
         // Payment summary
         payments: {
@@ -148,6 +153,22 @@ export class TenantDashboardService {
       moveInConfirmed: rental.moveInConfirmed,
       stats: rental.stats
     };
+  }
+
+  /**
+   * Past (ended/suspended) rentals — read-only history on profile
+   */
+  private async getPastRentals(tenantId: string): Promise<any[]> {
+    const rentals = await Rental.find({
+      tenantId: new Types.ObjectId(tenantId),
+      status: { $in: ["ended", "suspended"] },
+    })
+      .populate("propertyId", "title address images")
+      .populate("landlordId", "firstName lastName email phone")
+      .populate("agreementId", "status terminatedAt startDate endDate")
+      .sort({ endedAt: -1, updatedAt: -1 });
+
+    return enrichRentalsForApi(rentals);
   }
 
   /**

@@ -4,10 +4,57 @@ import { ConditionLog } from "../models/ConditionLog";
 import { Payment } from "../models/Payment";
 import { Agreement } from "../models/Agreement";
 import { Property } from "../models/Property";
+import { Signature } from "../models/Signature";
 import { Types } from "mongoose";
-import { TEST_MODE, addMonths } from "../config/testMode";
+import { TEST_MODE, addMonths, countLeaseMonthlyPayments } from "../config/testMode";
+import {
+  assertRentalAcceptsNewBookings,
+  assertRentalAcceptsTenantPayments,
+  getRentalCapabilities,
+} from "../utils/rentalCapabilities";
+import { enrichRentalForApi } from "../utils/enrichRentalResponse";
 
 export class RentalService {
+  /**
+   * Mark property off-market for tenant search.
+   */
+  async markPropertyAsRented(propertyId: unknown): Promise<void> {
+    const id = (propertyId as any)?._id ?? propertyId;
+    if (!id) return;
+    await Property.findByIdAndUpdate(id, { status: "rented" });
+  }
+
+  /**
+   * Ensure embedded agreement signature fields match Signature collection.
+   */
+  private async syncAgreementSignaturesFromRecords(agreement: any): Promise<boolean> {
+    const agreementId = agreement._id;
+    const [landlordSig, tenantSig] = await Promise.all([
+      Signature.findOne({ agreementId, userRole: "landlord", isActive: { $ne: false } }),
+      Signature.findOne({ agreementId, userRole: "tenant", isActive: { $ne: false } }),
+    ]);
+
+    if (!landlordSig || !tenantSig) return false;
+
+    if (!agreement.landlordSignature?.signedAt) {
+      agreement.landlordSignature = {
+        signedAt: landlordSig.signedAt,
+        signatureUrl: landlordSig.signatureUrl || undefined,
+        ipAddress: landlordSig.ipAddress,
+      };
+    }
+    if (!agreement.tenantSignature?.signedAt) {
+      agreement.tenantSignature = {
+        signedAt: tenantSig.signedAt,
+        signatureUrl: tenantSig.signatureUrl || undefined,
+        ipAddress: tenantSig.ipAddress,
+        paymentStatus: agreement.tenantSignature?.paymentStatus || "deferred",
+      };
+    }
+
+    return true;
+  }
+
   /**
    * Auto-create rental when agreement is fully signed
    */
@@ -18,15 +65,20 @@ export class RentalService {
       throw new Error("Agreement not found");
     }
 
-    // Check if both parties have signed
-    if (!agreement.landlordSignature || !agreement.tenantSignature) {
+    const bothSigned = await this.syncAgreementSignaturesFromRecords(agreement);
+    if (!bothSigned) {
       throw new Error("Agreement must be fully signed by both parties");
+    }
+
+    if (agreement.isModified()) {
+      await agreement.save();
     }
 
     // Check if rental already exists for this agreement
     const existingRental = await Rental.findOne({ agreementId });
     if (existingRental) {
       console.log(`✅ Rental already exists for agreement: ${agreementId}`);
+      await this.markPropertyAsRented(agreement.propertyId);
       return existingRental;
     }
 
@@ -47,6 +99,8 @@ export class RentalService {
 
     await rental.save();
     console.log(`🎉 Rental created for agreement: ${agreementId}`);
+
+    await this.markPropertyAsRented(agreement.propertyId);
 
     // Create initial payment records
     console.log(`📅 Creating payment schedule for rental: ${rental._id}`);
@@ -75,10 +129,14 @@ export class RentalService {
     }
 
     let startDate = new Date(rental.startDate);
-    const endDate = new Date(rental.endDate);
+    const originalEndDate = new Date(rental.endDate);
+    const paymentCountTarget = countLeaseMonthlyPayments(
+      new Date(rental.startDate),
+      originalEndDate
+    );
     
-    // In test mode: if startDate is in the future (more than 1 hour), adjust it to now + 10 minutes
-    // This ensures payments are within the test window
+    // In test mode: if startDate is in the future (more than 1 hour), adjust it to now
+    // so due dates fall inside the compressed test window (end date is NOT stretched).
     if (TEST_MODE) {
       const now = new Date();
       const oneHourFromNow = new Date(now.getTime() + 60 * 60 * 1000);
@@ -86,11 +144,15 @@ export class RentalService {
       if (startDate > oneHourFromNow) {
         console.log(`⚠️  Test Mode: Agreement startDate (${startDate.toISOString()}) is too far in future.`);
         console.log(`   Adjusting first payment to: ${now.toISOString()} (now)`);
-        startDate = new Date(now); // Set first payment to now
+        startDate = new Date(now);
       }
     }
-    
-    let currentDate = new Date(startDate);
+
+    console.log(`📊 Payment Schedule Creation Started:`);
+    console.log(`   - Rental ID: ${rental._id}`);
+    console.log(`   - Lease installments: ${paymentCountTarget}`);
+    console.log(`   - First due: ${startDate.toISOString()}`);
+    console.log(`   - Lease end: ${originalEndDate.toISOString()}`);
 
     // Check if property has "added_to_rent" insurance — if so, add the premium to the payment amount
     let insuranceSurcharge = 0;
@@ -105,22 +167,50 @@ export class RentalService {
       }
     }
 
-    const paymentAmount = Math.round((rental.monthlyRent + insuranceSurcharge) * 100) / 100;
+    const basePaymentAmount = Math.round((rental.monthlyRent + insuranceSurcharge) * 100) / 100;
 
-    console.log(`📊 Payment Schedule Creation Started:`);
-    console.log(`   - Rental ID: ${rental._id}`);
-    console.log(`   - Start Date: ${startDate.toISOString()}`);
-    console.log(`   - End Date: ${endDate.toISOString()}`);
+    let agreementFeePortion = 0;
+    if (rental.agreementId) {
+      const agreement = await Agreement.findById(rental.agreementId).lean();
+      const { agreementFeeService } = await import("./AgreementFeeService");
+      agreementFeePortion = agreementFeeService.getFeePortionForFirstRent(agreement as any);
+      if (agreementFeePortion > 0) {
+        console.log(`   - Agreement Fee (first installment): K${agreementFeePortion}`);
+      }
+    }
+
+    const firstPaymentTotal =
+      Math.round((basePaymentAmount + agreementFeePortion) * 100) / 100;
+
     console.log(`   - Monthly Rent: K${rental.monthlyRent}`);
     if (insuranceSurcharge > 0) {
       console.log(`   - Insurance Surcharge: K${insuranceSurcharge} (added_to_rent)`);
-      console.log(`   - Total Monthly Payment: K${paymentAmount}`);
+      console.log(`   - Total Monthly Payment: K${basePaymentAmount}`);
+    }
+    if (agreementFeePortion > 0) {
+      console.log(`   - First Payment Total: K${firstPaymentTotal} (includes agreement fee)`);
     }
     console.log(`   - Test Mode: ${TEST_MODE ? 'ENABLED (1 month = 10 minutes)' : 'DISABLED (normal months)'}`);
 
     let paymentCount = 0;
 
-    while (currentDate <= endDate) {
+    for (let i = 0; i < paymentCountTarget; i++) {
+      const currentDate = i === 0 ? new Date(startDate) : addMonths(startDate, i);
+      const isFirstPayment = i === 0;
+      const feeForThisPayment = isFirstPayment ? agreementFeePortion : 0;
+      const paymentAmount = isFirstPayment ? firstPaymentTotal : basePaymentAmount;
+
+      const metadata: Record<string, number> = {};
+      if (isFirstPayment && (insuranceSurcharge > 0 || feeForThisPayment > 0)) {
+        metadata.rentPortion = rental.monthlyRent;
+        if (insuranceSurcharge > 0) {
+          metadata.insurancePortion = insuranceSurcharge;
+        }
+        if (feeForThisPayment > 0) {
+          metadata.agreementFeePortion = feeForThisPayment;
+        }
+      }
+
       const payment = await Payment.create({
         rentalId: rental._id,
         agreementId: rental.agreementId,
@@ -131,23 +221,16 @@ export class RentalService {
         amount: paymentAmount,
         dueDate: new Date(currentDate),
         status: "pending",
-        paymentMethod: "in_app"
+        paymentMethod: "in_app",
+        ...(Object.keys(metadata).length > 0 ? { metadata } : {}),
       });
 
       paymentCount++;
-      console.log(`   ✅ Payment ${paymentCount} created: ID=${payment._id}, Due=${currentDate.toISOString()}, Amount=K${rental.monthlyRent}`);
-      
-      // Move to next month
-      if (TEST_MODE) {
-        // Test mode: 1 month = 10 minutes
-        const oldDate = new Date(currentDate);
-        currentDate = addMonths(currentDate, 1);
-        console.log(`   ⏭️  Next payment: ${oldDate.toISOString()} → ${currentDate.toISOString()} (10 minutes later in test mode)`);
-      } else {
-        // Production mode: actual months
-        const oldDate = new Date(currentDate);
-        currentDate.setMonth(currentDate.getMonth() + 1);
-        console.log(`   ⏭️  Next payment: ${oldDate.toISOString()} → ${currentDate.toISOString()} (1 month later)`);
+      console.log(`   ✅ Payment ${paymentCount}/${paymentCountTarget} created: ID=${payment._id}, Due=${currentDate.toISOString()}, Amount=K${paymentAmount}`);
+
+      if (i < paymentCountTarget - 1) {
+        const nextDate = addMonths(startDate, i + 1);
+        console.log(`   ⏭️  Next payment: ${currentDate.toISOString()} → ${nextDate.toISOString()}${TEST_MODE ? " (10 minutes later in test mode)" : " (1 month later)"}`);
       }
     }
 
@@ -192,19 +275,32 @@ export class RentalService {
     const conditionLogs = await ConditionLog.find({ rentalId: rental._id })
       .sort({ dueDate: 1 });
 
-    // Calculate next action required
+    const capabilities = getRentalCapabilities(rental);
+    const enrichedRental = await enrichRentalForApi(rental);
+
+    // Calculate next action required (active rentals only)
     let nextAction = null;
     const now = new Date();
 
+    if (capabilities.isEnded || capabilities.isSuspended) {
+      nextAction = {
+        type: "rental_ended",
+        message: capabilities.statusLabel,
+        dueDate: rental.endedAt || null,
+      };
+    }
+
     // Check for overdue payments
-    const overduePayment = payments.find(p => p.status === 'pending' && p.dueDate < now);
+    const overduePayment =
+      !capabilities.isReadOnlyHistory &&
+      payments.find((p) => p.status === "pending" && p.dueDate < now);
     if (overduePayment) {
       nextAction = {
         type: "payment_overdue",
         message: "Payment overdue",
         dueDate: overduePayment.dueDate
       };
-    } else {
+    } else if (!capabilities.isReadOnlyHistory) {
       // Check for upcoming payments (within 5 days)
       const upcomingPayment = payments.find(p => {
         if (p.status !== 'pending') return false;
@@ -248,18 +344,33 @@ export class RentalService {
       }
     }
 
+    const verifiedPayments = payments.filter((p) => p.status === "verified");
+    const totalVerifiedAmount = verifiedPayments.reduce((sum, p) => sum + (p.amount || 0), 0);
+
     return {
-      rental,
+      rental: enrichedRental,
+      capabilities,
       payments,
       conditionLogs,
-      nextAction
+      nextAction,
+      paymentSummary: {
+        totalVerifiedAmount,
+        verifiedCount: verifiedPayments.length,
+        pendingCount: payments.filter((p) => p.status === "pending").length,
+        totalCount: payments.length,
+      },
     };
   }
 
   /**
    * Get user's rentals (landlord or tenant)
+   * @param statusFilter active | ended | suspended | all (default all)
    */
-  async getUserRentals(userId: string, userRole: string): Promise<IRental[]> {
+  async getUserRentals(
+    userId: string,
+    userRole: string,
+    statusFilter: "active" | "ended" | "suspended" | "all" = "all"
+  ): Promise<any[]> {
     const query: any = {};
     
     if (userRole === "landlord") {
@@ -270,13 +381,18 @@ export class RentalService {
       throw new Error("Invalid user role");
     }
 
+    if (statusFilter !== "all") {
+      query.status = statusFilter;
+    }
+
     const rentals = await Rental.find(query)
       .populate("propertyId", "title address images")
       .populate("landlordId", "firstName lastName email")
       .populate("tenantId", "firstName lastName email")
+      .populate("agreementId", "status terminatedAt")
       .sort({ createdAt: -1 });
 
-    return rentals;
+    return Promise.all(rentals.map((r) => enrichRentalForApi(r)));
   }
 
   /**
@@ -308,6 +424,8 @@ export class RentalService {
     if (tenantIdStr !== userIdStr && landlordIdStr !== userIdStr) {
       throw new Error("Access denied");
     }
+
+    assertRentalAcceptsNewBookings(rental);
 
     // Validate photo count
     if (data.photoUrls && data.photoUrls.length > 3) {
@@ -470,6 +588,11 @@ export class RentalService {
       throw new Error("Payment already submitted");
     }
 
+    const rental = await Rental.findById(payment.rentalId);
+    if (rental) {
+      assertRentalAcceptsTenantPayments(rental);
+    }
+
     // Update payment
     payment.proofOfPayment = data.proofOfPayment;
     payment.paymentMethod = data.paymentMethod as any;
@@ -481,21 +604,21 @@ export class RentalService {
     await payment.save();
 
     // Update rental stats
-    const rental = await Rental.findById(payment.rentalId);
-    if (rental) {
-      rental.stats.paidPayments += 1;
+    const rentalForStats = await Rental.findById(payment.rentalId);
+    if (rentalForStats) {
+      rentalForStats.stats.paidPayments += 1;
       
       // Update next payment due
       const nextPendingPayment = await Payment.findOne({
-        rentalId: rental._id,
+        rentalId: rentalForStats._id,
         status: "pending"
       }).sort({ dueDate: 1 });
 
       if (nextPendingPayment) {
-        rental.nextPaymentDue = nextPendingPayment.dueDate;
+        rentalForStats.nextPaymentDue = nextPendingPayment.dueDate;
       }
 
-      await rental.save();
+      await rentalForStats.save();
     }
 
     console.log(`💰 Payment proof submitted for rental: ${payment.rentalId}`);
@@ -676,7 +799,8 @@ export class RentalService {
   }
 
   /**
-   * End rental (when agreement terminates or expires)
+   * End rental (when agreement terminates or expires).
+   * Property goes inactive (off search); landlord can republish from settings.
    */
   async endRental(rentalId: string): Promise<IRental> {
     const rental = await Rental.findById(rentalId);
@@ -690,9 +814,29 @@ export class RentalService {
 
     await rental.save();
 
-    console.log(`🔚 Rental ended: ${rentalId}`);
+    await Property.findByIdAndUpdate(rental.propertyId, { status: "inactive" });
+
+    console.log(`🔚 Rental ended: ${rentalId} — property set inactive (off search)`);
 
     return rental;
+  }
+
+  /**
+   * When an agreement is terminated: end active rental and take property off search.
+   */
+  async finalizeAgreementTermination(agreementId: string, propertyId: unknown): Promise<void> {
+    const propertyObjectId = (propertyId as any)?._id ?? propertyId;
+
+    const rental = await Rental.findOne({ agreementId });
+    if (rental && rental.status !== "ended") {
+      await this.endRental(rental._id.toString());
+      return;
+    }
+
+    if (propertyObjectId) {
+      await Property.findByIdAndUpdate(propertyObjectId, { status: "inactive" });
+      console.log(`📴 Property ${propertyObjectId} set inactive after agreement termination`);
+    }
   }
 
   /**
@@ -804,6 +948,8 @@ export class RentalService {
       throw new Error("Only the tenant can create maintenance requests");
     }
 
+    assertRentalAcceptsNewBookings(rental);
+
     const request = await MaintenanceRequest.create({
       rentalId: rental._id,
       agreementId: rental.agreementId,
@@ -888,6 +1034,8 @@ export class RentalService {
     if (tenantIdStr !== userIdStr && userRole !== "tenant") {
       throw new Error("Only the tenant can create service bookings");
     }
+
+    assertRentalAcceptsNewBookings(rental);
 
     const booking = await ServiceBooking.create({
       rentalId: rental._id,

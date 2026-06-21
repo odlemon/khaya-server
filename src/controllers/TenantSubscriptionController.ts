@@ -1,7 +1,8 @@
 // @ts-nocheck
 import { Request, Response } from "express";
 import { subscriptionService } from "../services/SubscriptionService";
-import { paynowService } from "../services/PaynowService";
+import { paymentGatewayService } from "../services/PaymentGatewayService";
+import { buildGatewayPaymentFields } from "../utils/paymentGatewayFields";
 import { PaymentRequest } from "../models/PaymentRequest";
 import { Payment } from "../models/Payment";
 import { Rental } from "../models/Rental";
@@ -67,39 +68,52 @@ export class TenantSubscriptionController {
       const price = subscriptionService["calculatePrice"](propertyValueBracket, planType);
 
       // All online subscription payments go via Paynow (phone already validated above)
-      const reference = paynowService.generateReference("TSUB", tenantId);
+      const reference = paymentGatewayService.generateReference("TSUB", tenantId);
+
+      const gatewayMeta = {
+        paymentPurpose: "tenant_subscription",
+        planType,
+        propertyValueBracket,
+      };
 
       const pendingPayment = await Payment.create({
-        rentalId: null, agreementId: null, propertyId: null,
+        rentalId: null,
+        agreementId: null,
+        propertyId: null,
         landlordId: new Types.ObjectId(tenantId),
         tenantId: new Types.ObjectId(tenantId),
         paymentType: "service",
-        amount: price, totalAmount: price,
+        amount: price,
+        totalAmount: price,
         paymentMethod: "in_app",
         status: "pending",
         notes: `Tenant subscription - ${planType}`,
-        paynowReference: reference,
-        paynowMetadata: { paymentPurpose: "tenant_subscription", planType, propertyValueBracket }
+        ...buildGatewayPaymentFields(reference, gatewayMeta),
       });
 
-      const paynowResult = await paynowService.initiateMobilePayment({
+      const gatewayResult = await paymentGatewayService.initiateMobilePayment({
         reference,
         description: `Tenant ${planType} subscription`,
         amount: price,
         phone: phone.trim(),
-        method: (mobileMethod && (mobileMethod === "onemoney" || mobileMethod === "ecocash")) ? mobileMethod : "ecocash"
+        method:
+          mobileMethod && (mobileMethod === "onemoney" || mobileMethod === "ecocash")
+            ? mobileMethod
+            : "ecocash",
       });
 
-      if (!paynowResult.success) {
+      if (!gatewayResult.success) {
         pendingPayment.status = "cancelled";
-        pendingPayment.rejectionReason = paynowResult.error;
+        pendingPayment.rejectionReason = gatewayResult.error;
         await pendingPayment.save();
-        res.status(400).json({ success: false, message: paynowResult.error || "Payment initiation failed" });
+        res.status(400).json({ success: false, message: gatewayResult.error || "Payment initiation failed" });
         return;
       }
 
-      pendingPayment.pollUrl = paynowResult.pollUrl;
-      await pendingPayment.save();
+      if (gatewayResult.pollUrl) {
+        pendingPayment.pollUrl = gatewayResult.pollUrl;
+        await pendingPayment.save();
+      }
 
       res.status(201).json({
         success: true,
@@ -107,10 +121,11 @@ export class TenantSubscriptionController {
         data: {
           paymentId: pendingPayment._id,
           reference,
-          pollUrl: paynowResult.pollUrl,
-          instructions: paynowResult.instructions,
-          statusCheckUrl: `/api/webhooks/payment-status/${pendingPayment._id}`
-        }
+          pollUrl: gatewayResult.pollUrl || null,
+          instructions: gatewayResult.instructions,
+          statusCheckUrl: `/api/webhooks/payment-status/${pendingPayment._id}`,
+          gateway: paymentGatewayService.provider,
+        },
       });
     } catch (error: any) {
       console.error("Error subscribing:", error);

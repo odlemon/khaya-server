@@ -32,8 +32,13 @@ export interface IAgreement extends Document {
     signatureData: string;
     signatureUrl?: string;
     ipAddress: string;
-    paymentStatus?: "pending_payment" | "payment_approved" | "verified"; // Status of payment for this signature
+    paymentStatus?: "no_payment" | "pending_payment" | "payment_approved" | "verified" | "deferred";
   };
+
+  /** One-time agreement processing fee (USD 30–50); charged on first rent when deferred */
+  agreementFeeAmount?: number;
+  agreementFeeStatus?: "pending" | "charged";
+  agreementFeeChargedAt?: Date;
   
   // Documents
   attachments: {
@@ -152,10 +157,17 @@ const agreementSchema = new Schema<IAgreement>({
     ipAddress: { type: String },
     paymentStatus: { 
       type: String, 
-      enum: ["no_payment", "pending_payment", "payment_approved", "verified"]
-      // No default - must be explicitly set when tenant signs
+      enum: ["no_payment", "pending_payment", "payment_approved", "verified", "deferred"]
     }
   },
+
+  agreementFeeAmount: { type: Number, default: 0 },
+  agreementFeeStatus: {
+    type: String,
+    enum: ["pending", "charged"],
+    default: "pending",
+  },
+  agreementFeeChargedAt: { type: Date },
   
   // Documents
   attachments: [{

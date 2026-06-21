@@ -1,7 +1,8 @@
 // @ts-nocheck
 import { Request, Response } from "express";
 import { landlordSubscriptionService } from "../services/LandlordSubscriptionService";
-import { paynowService } from "../services/PaynowService";
+import { paymentGatewayService } from "../services/PaymentGatewayService";
+import { buildGatewayPaymentFields } from "../utils/paymentGatewayFields";
 import { emailNotificationService } from "../services/EmailNotificationService";
 import { Payment } from "../models/Payment";
 import { User } from "../models/User";
@@ -16,7 +17,7 @@ export class LandlordSubscriptionController {
   async subscribe(req: Request, res: Response): Promise<void> {
     try {
       const landlordId = (req as any).user?.userId || (req as any).user?.id;
-      const { planType, paymentMethod, gatewayResponse, autoRenew } = req.body;
+      const { planType, paymentMethod, autoRenew } = req.body;
 
       if (!planType || !paymentMethod) {
         res.status(400).json({
@@ -39,63 +40,72 @@ export class LandlordSubscriptionController {
         return;
       }
 
-      // Paynow mobile money path
+      // Online mobile money (ContiPay / PayNow)
       const { phone, mobileMethod } = req.body;
-      if (phone) {
-        const price = landlordSubscriptionService.calculateSubscriptionPrice(planType);
-        const reference = paynowService.generateReference("LSUB", landlordId);
-
-        const pendingPayment = await Payment.create({
-          rentalId: null, agreementId: null, propertyId: null,
-          landlordId: new Types.ObjectId(landlordId),
-          tenantId: new Types.ObjectId(landlordId),
-          paymentType: "service",
-          amount: price, totalAmount: price,
-          paymentMethod: "in_app", status: "pending",
-          notes: `Landlord premium subscription - ${planType}`,
-          paynowReference: reference,
-          paynowMetadata: { paymentPurpose: "landlord_premium_subscription", planType, autoRenew: autoRenew !== false }
-        });
-
-        const paynowResult = await paynowService.initiateMobilePayment({
-          reference, description: `Landlord ${planType} subscription`,
-          amount: price, phone, method: mobileMethod || "ecocash"
-        });
-
-        if (!paynowResult.success) {
-          pendingPayment.status = "cancelled";
-          pendingPayment.rejectionReason = paynowResult.error;
-          await pendingPayment.save();
-          res.status(400).json({ success: false, message: paynowResult.error || "Payment initiation failed" });
-          return;
-        }
-
-        pendingPayment.pollUrl = paynowResult.pollUrl;
-        await pendingPayment.save();
-
-        res.status(201).json({
-          success: true,
-          message: "Subscription payment initiated. Check your phone.",
-          data: {
-            paymentId: pendingPayment._id, reference,
-            pollUrl: paynowResult.pollUrl, instructions: paynowResult.instructions,
-            statusCheckUrl: `/api/webhooks/payment-status/${pendingPayment._id}`
-          }
+      if (!phone) {
+        res.status(400).json({
+          success: false,
+          message: "Phone number is required for EcoCash online payments",
         });
         return;
       }
 
-      // Legacy gatewayResponse path
-      if (!gatewayResponse) {
-        res.status(400).json({ success: false, message: "Phone number or gateway response required for payment" });
-        return;
-      }
+      const price = landlordSubscriptionService.calculateSubscriptionPrice(planType);
+      const reference = paymentGatewayService.generateReference("LSUB", landlordId);
+      const gatewayMeta = {
+        paymentPurpose: "landlord_premium_subscription",
+        planType,
+        autoRenew: autoRenew !== false,
+      };
 
-      const result = await landlordSubscriptionService.subscribe({
-        landlordId, planType, paymentMethod: "in_app", gatewayResponse, autoRenew: autoRenew !== false
+      const pendingPayment = await Payment.create({
+        rentalId: null,
+        agreementId: null,
+        propertyId: null,
+        landlordId: new Types.ObjectId(landlordId),
+        tenantId: new Types.ObjectId(landlordId),
+        paymentType: "service",
+        amount: price,
+        totalAmount: price,
+        paymentMethod: "in_app",
+        status: "pending",
+        notes: `Landlord premium subscription - ${planType}`,
+        ...buildGatewayPaymentFields(reference, gatewayMeta),
       });
 
-      res.status(200).json({ success: true, message: "Subscription activated successfully", data: result });
+      const gatewayResult = await paymentGatewayService.initiateMobilePayment({
+        reference,
+        description: `Landlord ${planType} subscription`,
+        amount: price,
+        phone,
+        method: mobileMethod || "ecocash",
+      });
+
+      if (!gatewayResult.success) {
+        pendingPayment.status = "cancelled";
+        pendingPayment.rejectionReason = gatewayResult.error;
+        await pendingPayment.save();
+        res.status(400).json({ success: false, message: gatewayResult.error || "Payment initiation failed" });
+        return;
+      }
+
+      if (gatewayResult.pollUrl) {
+        pendingPayment.pollUrl = gatewayResult.pollUrl;
+        await pendingPayment.save();
+      }
+
+      res.status(201).json({
+        success: true,
+        message: "Subscription payment initiated. Check your phone.",
+        data: {
+          paymentId: pendingPayment._id,
+          reference,
+          pollUrl: gatewayResult.pollUrl || null,
+          instructions: gatewayResult.instructions,
+          statusCheckUrl: `/api/webhooks/payment-status/${pendingPayment._id}`,
+          gateway: paymentGatewayService.provider,
+        },
+      });
     } catch (error: any) {
       console.error("Error subscribing:", error);
       res.status(500).json({
@@ -216,7 +226,7 @@ export class LandlordSubscriptionController {
   async subscribeToZeroDepositProtection(req: Request, res: Response): Promise<void> {
     try {
       const landlordId = (req as any).user?.userId || (req as any).user?.id;
-      const { paymentMethod, gatewayResponse, autoRenew, propertyCount } = req.body;
+      const { paymentMethod, autoRenew, propertyCount } = req.body;
 
       if (!paymentMethod) {
         res.status(400).json({
@@ -231,63 +241,71 @@ export class LandlordSubscriptionController {
         return;
       }
 
-      // Paynow mobile money path
       const { phone, mobileMethod } = req.body;
-      if (phone) {
-        const price = landlordSubscriptionService.calculateZeroDepositProtectionPrice(propertyCount);
-        const reference = paynowService.generateReference("ZDEP", landlordId);
-
-        const pendingPayment = await Payment.create({
-          rentalId: null, agreementId: null, propertyId: null,
-          landlordId: new Types.ObjectId(landlordId),
-          tenantId: new Types.ObjectId(landlordId),
-          paymentType: "service",
-          amount: price, totalAmount: price,
-          paymentMethod: "in_app", status: "pending",
-          notes: `Zero Deposit Protection subscription`,
-          paynowReference: reference,
-          paynowMetadata: { paymentPurpose: "zero_deposit_protection", autoRenew: autoRenew !== false, propertyCount }
-        });
-
-        const paynowResult = await paynowService.initiateMobilePayment({
-          reference, description: "Zero Deposit Protection subscription",
-          amount: price, phone, method: mobileMethod || "ecocash"
-        });
-
-        if (!paynowResult.success) {
-          pendingPayment.status = "cancelled";
-          pendingPayment.rejectionReason = paynowResult.error;
-          await pendingPayment.save();
-          res.status(400).json({ success: false, message: paynowResult.error || "Payment initiation failed" });
-          return;
-        }
-
-        pendingPayment.pollUrl = paynowResult.pollUrl;
-        await pendingPayment.save();
-
-        res.status(201).json({
-          success: true,
-          message: "Zero Deposit Protection payment initiated. Check your phone.",
-          data: {
-            paymentId: pendingPayment._id, reference,
-            pollUrl: paynowResult.pollUrl, instructions: paynowResult.instructions,
-            statusCheckUrl: `/api/webhooks/payment-status/${pendingPayment._id}`
-          }
+      if (!phone) {
+        res.status(400).json({
+          success: false,
+          message: "Phone number is required for EcoCash online payments",
         });
         return;
       }
 
-      // Legacy gatewayResponse path
-      if (!gatewayResponse) {
-        res.status(400).json({ success: false, message: "Phone number or gateway response required for payment" });
-        return;
-      }
+      const price = landlordSubscriptionService.calculateZeroDepositProtectionPrice(propertyCount);
+      const reference = paymentGatewayService.generateReference("ZDEP", landlordId);
+      const gatewayMeta = {
+        paymentPurpose: "zero_deposit_protection",
+        autoRenew: autoRenew !== false,
+        propertyCount,
+      };
 
-      const result = await landlordSubscriptionService.subscribeToZeroDepositProtection({
-        landlordId, paymentMethod: "in_app", gatewayResponse, autoRenew: autoRenew !== false, propertyCount
+      const pendingPayment = await Payment.create({
+        rentalId: null,
+        agreementId: null,
+        propertyId: null,
+        landlordId: new Types.ObjectId(landlordId),
+        tenantId: new Types.ObjectId(landlordId),
+        paymentType: "service",
+        amount: price,
+        totalAmount: price,
+        paymentMethod: "in_app",
+        status: "pending",
+        notes: "Zero Deposit Protection subscription",
+        ...buildGatewayPaymentFields(reference, gatewayMeta),
       });
 
-      res.status(200).json({ success: true, message: "Zero Deposit Protection subscription activated successfully", data: result });
+      const gatewayResult = await paymentGatewayService.initiateMobilePayment({
+        reference,
+        description: "Zero Deposit Protection subscription",
+        amount: price,
+        phone,
+        method: mobileMethod || "ecocash",
+      });
+
+      if (!gatewayResult.success) {
+        pendingPayment.status = "cancelled";
+        pendingPayment.rejectionReason = gatewayResult.error;
+        await pendingPayment.save();
+        res.status(400).json({ success: false, message: gatewayResult.error || "Payment initiation failed" });
+        return;
+      }
+
+      if (gatewayResult.pollUrl) {
+        pendingPayment.pollUrl = gatewayResult.pollUrl;
+        await pendingPayment.save();
+      }
+
+      res.status(201).json({
+        success: true,
+        message: "Zero Deposit Protection payment initiated. Check your phone.",
+        data: {
+          paymentId: pendingPayment._id,
+          reference,
+          pollUrl: gatewayResult.pollUrl || null,
+          instructions: gatewayResult.instructions,
+          statusCheckUrl: `/api/webhooks/payment-status/${pendingPayment._id}`,
+          gateway: paymentGatewayService.provider,
+        },
+      });
     } catch (error: any) {
       console.error("Error subscribing to zero deposit protection:", error);
       res.status(500).json({

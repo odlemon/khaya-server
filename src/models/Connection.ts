@@ -24,6 +24,10 @@ export interface IConnection extends Document {
   respondedAt?: Date;
   respondedBy?: mongoose.Types.ObjectId;
   isActive: boolean;
+  /** Set when tenant soft-clears a cancelled/rejected request from their list */
+  dismissedByTenantAt?: Date;
+  /** Set when landlord soft-clears a cancelled/rejected request from their list */
+  dismissedByLandlordAt?: Date;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -102,6 +106,14 @@ const connectionSchema = new Schema<IConnection>({
   isActive: { 
     type: Boolean, 
     default: true 
+  },
+  dismissedByTenantAt: {
+    type: Date,
+    default: null
+  },
+  dismissedByLandlordAt: {
+    type: Date,
+    default: null
   }
 }, { 
   timestamps: true 
@@ -110,12 +122,14 @@ const connectionSchema = new Schema<IConnection>({
 // Indexes for better query performance
 connectionSchema.index({ landlordId: 1, status: 1 });
 connectionSchema.index({ tenantId: 1, status: 1 });
+connectionSchema.index({ tenantId: 1, dismissedByTenantAt: 1, status: 1 });
+connectionSchema.index({ landlordId: 1, dismissedByLandlordAt: 1, status: 1 });
 connectionSchema.index({ propertyId: 1, status: 1 });
 
-// Compound index to ensure unique connections (this also serves as a query index)
+// Only one active request per tenant/landlord/property; inactive rows kept for History
 connectionSchema.index(
-  { tenantId: 1, landlordId: 1, propertyId: 1 }, 
-  { unique: true }
+  { tenantId: 1, landlordId: 1, propertyId: 1 },
+  { unique: true, partialFilterExpression: { isActive: true } }
 );
 
 // Virtual for checking if connection allows chat

@@ -29,7 +29,7 @@ export interface IPayment extends Document {
   proofOfPayment?: string; // Firebase URL (optional for cash)
   
   gatewayResponse?: {
-    provider: "paynow" | "stripe" | "paystack" | "flutterwave" | "other";
+    provider: "paynow" | "contipay" | "stripe" | "paystack" | "flutterwave" | "other";
     transactionId: string;
     transactionRef: string;
     paidAt: Date;
@@ -57,10 +57,25 @@ export interface IPayment extends Document {
   }];
   
   notes?: string;
+
+  /** Breakdown for first rent when agreement fee is bundled */
+  metadata?: {
+    rentPortion?: number;
+    agreementFeePortion?: number;
+    insurancePortion?: number;
+    [key: string]: unknown;
+  };
   
-  // Paynow gateway fields
+  // Payment gateway fields (ContiPay / PayNow)
   pollUrl?: string;
+  gatewayReference?: string;
+  gatewayMetadata?: {
+    paymentPurpose: string;
+    [key: string]: any;
+  };
+  /** @deprecated use gatewayReference */
   paynowReference?: string;
+  /** @deprecated use gatewayMetadata */
   paynowMetadata?: {
     paymentPurpose: string;
     [key: string]: any;
@@ -125,7 +140,7 @@ const paymentSchema = new Schema<IPayment>({
   proofOfPayment: { type: String }, // Optional for cash
   
   gatewayResponse: {
-    provider: { type: String, enum: ["paynow", "stripe", "paystack", "flutterwave", "other"] },
+    provider: { type: String, enum: ["paynow", "contipay", "stripe", "paystack", "flutterwave", "other"] },
     transactionId: { type: String },
     transactionRef: { type: String },
     paidAt: { type: Date },
@@ -157,9 +172,13 @@ const paymentSchema = new Schema<IPayment>({
   }],
   
   notes: { type: String },
+
+  metadata: { type: Schema.Types.Mixed },
   
-  // Paynow gateway fields
+  // Payment gateway fields
   pollUrl: { type: String },
+  gatewayReference: { type: String, index: true },
+  gatewayMetadata: { type: Schema.Types.Mixed },
   paynowReference: { type: String, index: true },
   paynowMetadata: { type: Schema.Types.Mixed }
 }, { 

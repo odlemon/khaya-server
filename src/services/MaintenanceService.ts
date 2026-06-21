@@ -2,6 +2,7 @@
 import mongoose from "mongoose";
 import { IMaintenanceRequest, MaintenanceRequest } from "../models/MaintenanceRequest";
 import { Rental } from "../models/Rental";
+import { appNotificationService } from "./AppNotificationService";
 
 type Role = "tenant" | "landlord" | "admin";
 
@@ -47,6 +48,26 @@ export class MaintenanceService {
       videoUrls: data.videoUrls || [],
       status: "pending"
     });
+
+    if (userRole === "tenant") {
+      try {
+        await appNotificationService.notify({
+          userId: rental.landlordId.toString(),
+          type: "maintenance_request",
+          title: "New maintenance request",
+          body: `${data.title} (${data.urgency} urgency)`,
+          data: {
+            maintenanceRequestId: request._id.toString(),
+            propertyId: rental.propertyId.toString(),
+            rentalId: rental._id.toString(),
+            senderId: userId.toString(),
+          },
+        });
+      } catch (notifyErr) {
+        console.error("In-app notify (maintenance request):", notifyErr?.message || notifyErr);
+      }
+    }
+
     return request;
   }
 
@@ -166,6 +187,13 @@ export class MaintenanceService {
     await req.save();
     
     console.log("✅ Maintenance request approved, awaiting vendor assignment:", id);
+
+    await this.notifyTenantMaintenanceUpdate(
+      req,
+      "Maintenance request approved",
+      "Your maintenance request was approved by the landlord"
+    );
+
     return req;
   }
 
@@ -201,6 +229,12 @@ export class MaintenanceService {
       console.log("  - Tenant can see", tenantRequests.length, "requests");
       console.log("  - Tenant request statuses:", tenantRequests.map(r => ({ id: r._id, status: r.status })));
       
+      await this.notifyTenantMaintenanceUpdate(
+        req,
+        "Maintenance request declined",
+        `Your maintenance request was declined: ${reason}`
+      );
+
       return req;
     } catch (error) {
       console.error("❌ Error rejecting maintenance request:", error);
@@ -241,6 +275,15 @@ export class MaintenanceService {
     });
     
     await req.save();
+
+    if (role === "landlord" || role === "admin") {
+      await this.notifyTenantMaintenanceUpdate(
+        req,
+        "Maintenance completed",
+        notes || "Your maintenance request has been marked complete"
+      );
+    }
+
     return req;
   }
 
@@ -376,6 +419,28 @@ export class MaintenanceService {
 
     await req.save();
     return req;
+  }
+
+  private async notifyTenantMaintenanceUpdate(
+    req: IMaintenanceRequest,
+    title: string,
+    body: string
+  ): Promise<void> {
+    try {
+      await appNotificationService.notify({
+        userId: req.tenantId.toString(),
+        type: "maintenance_update",
+        title,
+        body,
+        data: {
+          maintenanceRequestId: req._id.toString(),
+          propertyId: req.propertyId?.toString(),
+          rentalId: req.rentalId?.toString(),
+        },
+      });
+    } catch (notifyErr) {
+      console.error("In-app notify (maintenance update):", notifyErr?.message || notifyErr);
+    }
   }
 }
 

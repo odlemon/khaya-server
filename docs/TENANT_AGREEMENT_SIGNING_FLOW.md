@@ -4,10 +4,10 @@
 
 When a tenant wants to sign an agreement, they must:
 1. **Wait for landlord to sign first** (if not already signed)
-2. **Pay the Agreement Processing Fee** (one-time USD 30-50)
-3. **Then sign the agreement**
+2. **Sign the agreement** (no upfront fee required)
+3. **Pay the agreement processing fee with the first rent installment** (one-time USD 30–50, bundled into the first scheduled rent payment)
 
-**Important:** The agreement fee is a **one-time payment**, NOT a subscription.
+**Important:** The agreement fee is a **one-time payment**, NOT a subscription. Tenants may still pay the fee upfront via the legacy `pay-fee` endpoint or an external payment request if they prefer.
 
 ---
 
@@ -23,19 +23,34 @@ Authorization: Bearer <tenant_token>
 
 **Check:**
 - ✅ Is landlord signed? (`landlordSignature.signedAt` exists)
-- ✅ Can tenant sign? (Landlord must be signed)
+- ✅ Can tenant sign? (`canSignWithoutPayment: true` when landlord has signed)
+- ✅ Agreement fee: `agreementFeeAmount`, `agreementFeeStatus` (`pending` | `charged`)
+- ✅ Tenant fee state: `tenantSignature.paymentStatus` — `deferred` (default), `verified` (paid upfront), or `pending_payment` (external fee awaiting admin)
 
-**Note:** Tenant can sign even if payment is pending (for external payments). Signature will show as "pending payment approval".
+**Note:** Signing no longer requires upfront payment. After both parties sign, the rental is created and the fee is added to the **first** rent payment only.
 
 ---
 
-### Step 2: Pay Agreement Fee (Can Be Before or After Signing)
+### Step 2: Sign Agreement (No Upfront Fee Required)
 
-**✅ Tenant can sign first, then pay (or pay first, then sign)**
+**Endpoint:**
+```
+POST /api/agreements/:id/sign
+Authorization: Bearer <tenant_token>
+```
+
+When the tenant signs without paying upfront, `tenantSignature.paymentStatus` is set to **`deferred`**. When both parties have signed, the agreement moves to `status: "signed"` and a rental is created automatically.
+
+---
+
+### Step 3: Pay Agreement Fee (Optional Upfront — Legacy)
+
+Tenants who want to pay before signing can still use the flows below. If the fee is paid upfront, `agreementFeeStatus` becomes `charged` and it is **not** added to the first rent payment.
 
 **Payment Status Options:**
-- **Online Payment**: Pay → Sign immediately (signature status: "verified")
-- **External Payment**: Sign → Upload proof → Wait for approval (signature status: "pending_payment" → "verified" after approval)
+- **Deferred (default):** Sign first → fee collected on first rent payment (`paymentStatus: "deferred"`)
+- **Online upfront:** `POST /api/agreements/:id/pay-fee` → `paymentStatus: "verified"`
+- **External upfront:** Payment request → admin approval → `paymentStatus: "verified"`
 
 #### Option A: External Payment (Payment Request)
 
@@ -62,13 +77,11 @@ Authorization: Bearer <tenant_token>
 2. Tenant creates payment request
 3. Status: `pending_admin_approval`
 4. Admin reviews and approves
-5. Once approved, tenant can sign
+5. `agreementFeeStatus` set to `charged` (optional before signing)
 
 #### Option B: Online Payment (In-App)
 
-**⚠️ Note:** This endpoint needs to be implemented. For now, use payment request flow.
-
-**Endpoint (To Be Implemented):**
+**Endpoint:**
 ```
 POST /api/agreements/:agreementId/pay-fee
 Authorization: Bearer <tenant_token>
@@ -94,7 +107,18 @@ Authorization: Bearer <tenant_token>
 
 ---
 
-### Step 3: Sign Agreement
+### Step 4: First Rent Payment (Default Fee Collection)
+
+After the rental is created, the **first** scheduled rent payment amount includes:
+- Monthly rent
+- Insurance surcharge (if `added_to_rent` on the property)
+- Agreement processing fee (if `agreementFeeStatus === "pending"`)
+
+Subsequent rent payments exclude the agreement fee. Payment `metadata` includes `rentPortion`, `agreementFeePortion`, and `insurancePortion` for reconciliation.
+
+---
+
+### Step 5: Sign Agreement (Reference)
 
 **Endpoint:**
 ```

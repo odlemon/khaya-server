@@ -1,7 +1,8 @@
 // @ts-nocheck
 import { Request, Response, NextFunction } from "express";
 import { agreementService, CreateAgreementData, SignatureData } from "../services/AgreementService";
-import { paynowService } from "../services/PaynowService";
+import { paymentGatewayService } from "../services/PaymentGatewayService";
+import { buildGatewayPaymentFields } from "../utils/paymentGatewayFields";
 import { Payment } from "../models/Payment";
 import { Types } from "mongoose";
 
@@ -942,67 +943,75 @@ export class AgreementController {
         });
       }
 
-      const { amount, gatewayResponse, notes, phone, mobileMethod } = req.body;
+      const { amount, notes, phone, mobileMethod } = req.body;
 
       if (!amount || amount <= 0) {
         return res.status(400).json({ success: false, message: "Valid payment amount is required" });
       }
 
-      // Paynow mobile money path
-      if (phone) {
-        const { Agreement } = await import("../models/Agreement");
-        const agreement = await Agreement.findById(agreementId);
-        if (!agreement) {
-          return res.status(404).json({ success: false, message: "Agreement not found" });
-        }
-
-        const reference = paynowService.generateReference("AFEE", userId.toString());
-
-        const pendingPayment = await Payment.create({
-          rentalId: null, agreementId: new Types.ObjectId(agreementId),
-          propertyId: agreement.propertyId,
-          landlordId: agreement.landlordId,
-          tenantId: new Types.ObjectId(userId),
-          paymentType: "service",
-          amount, totalAmount: amount,
-          paymentMethod: "in_app", status: "pending",
-          notes: notes || "Agreement fee",
-          paynowReference: reference,
-          paynowMetadata: { paymentPurpose: "agreement_fee", agreementId }
-        });
-
-        const paynowResult = await paynowService.initiateMobilePayment({
-          reference, description: "Agreement fee payment",
-          amount, phone, method: mobileMethod || "ecocash"
-        });
-
-        if (!paynowResult.success) {
-          pendingPayment.status = "cancelled";
-          pendingPayment.rejectionReason = paynowResult.error;
-          await pendingPayment.save();
-          return res.status(400).json({ success: false, message: paynowResult.error || "Payment initiation failed" });
-        }
-
-        pendingPayment.pollUrl = paynowResult.pollUrl;
-        await pendingPayment.save();
-
-        return res.status(201).json({
-          success: true,
-          message: "Agreement fee payment initiated. Check your phone.",
-          data: {
-            paymentId: pendingPayment._id, reference,
-            pollUrl: paynowResult.pollUrl, instructions: paynowResult.instructions,
-            statusCheckUrl: `/api/webhooks/payment-status/${pendingPayment._id}`
-          }
+      if (!phone) {
+        return res.status(400).json({
+          success: false,
+          message: "Phone number is required for EcoCash online payments",
         });
       }
 
-      // Legacy gatewayResponse path
-      const result = await agreementService.payAgreementFeeOnline(agreementId, userId.toString(), {
-        amount, gatewayResponse, notes
+      const { Agreement } = await import("../models/Agreement");
+      const agreement = await Agreement.findById(agreementId);
+      if (!agreement) {
+        return res.status(404).json({ success: false, message: "Agreement not found" });
+      }
+
+      const reference = paymentGatewayService.generateReference("AFEE", userId.toString());
+      const gatewayMeta = { paymentPurpose: "agreement_fee", agreementId };
+
+      const pendingPayment = await Payment.create({
+        rentalId: null,
+        agreementId: new Types.ObjectId(agreementId),
+        propertyId: agreement.propertyId,
+        landlordId: agreement.landlordId,
+        tenantId: new Types.ObjectId(userId),
+        paymentType: "service",
+        amount,
+        totalAmount: amount,
+        paymentMethod: "in_app",
+        status: "pending",
+        notes: notes || "Agreement fee",
+        ...buildGatewayPaymentFields(reference, gatewayMeta),
       });
 
-      res.status(200).json({ success: true, message: "Agreement fee paid successfully", data: result });
+      const gatewayResult = await paymentGatewayService.initiateMobilePayment({
+        reference,
+        description: "Agreement fee payment",
+        amount,
+        phone,
+        method: mobileMethod || "ecocash",
+      });
+
+      if (!gatewayResult.success) {
+        pendingPayment.status = "cancelled";
+        pendingPayment.rejectionReason = gatewayResult.error;
+        await pendingPayment.save();
+        return res.status(400).json({ success: false, message: gatewayResult.error || "Payment initiation failed" });
+      }
+
+      if (gatewayResult.pollUrl) {
+        pendingPayment.pollUrl = gatewayResult.pollUrl;
+        await pendingPayment.save();
+      }
+
+      return res.status(201).json({
+        success: true,
+        message: "Agreement fee payment initiated. Check your phone.",
+        data: {
+          paymentId: pendingPayment._id,
+          reference,
+          pollUrl: gatewayResult.pollUrl || null,
+          instructions: gatewayResult.instructions,
+          statusCheckUrl: `/api/webhooks/payment-status/${pendingPayment._id}`,
+          gateway: paymentGatewayService.provider,
+        },
+      });
     } catch (error: any) {
       next(error);
     }

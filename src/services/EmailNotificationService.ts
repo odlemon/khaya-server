@@ -479,7 +479,7 @@ export class EmailNotificationService {
 
     const roleMessage = data.recipientRole === "landlord" 
       ? `A new rental agreement has been created for your property. Please review and sign the agreement.`
-      : `A new rental agreement has been created for you. Please review the terms and pay the agreement processing fee before signing.`;
+      : `A new rental agreement has been created for you. Please review the terms and sign when you are ready. The one-time agreement processing fee will be included in your first rent payment.`;
 
     return `
       <!DOCTYPE html>
@@ -513,8 +513,8 @@ export class EmailNotificationService {
             <div class="alert">
               <strong>Next Steps:</strong><br>
               ${data.recipientRole === "landlord" 
-                ? "1. Review the agreement details<br>2. Sign the agreement<br>3. Wait for tenant to pay fee and sign"
-                : "1. Review the agreement details<br>2. Pay the agreement processing fee ($30-50)<br>3. Sign the agreement after payment is verified"}
+                ? "1. Review the agreement details<br>2. Sign the agreement<br>3. Wait for tenant to sign"
+                : "1. Review the agreement details<br>2. Sign after your landlord has signed<br>3. Pay your first rent installment (includes the agreement fee)"}
             </div>
 
             <div class="details">
