@@ -111,7 +111,19 @@ class ContipayService {
     this.ensureConfigured();
 
     const { reference, description, amount, email, firstName, lastName } = params;
-    const cell = normalizeEcoCashPhone(params.phone);
+    let cell: string;
+    try {
+      cell = normalizeEcoCashPhone(contipayConfig.resolveEcoCashPhone(params.phone));
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+
+    if (contipayConfig.isSandboxMode() && params.phone && normalizeEcoCashPhone(params.phone) !== cell) {
+      LOG_WARN(
+        `Sandbox mode: ignoring user phone ${params.phone}, using test number ${cell}`
+      );
+    }
+
     const customerFirst = firstName || "Customer";
     const customerLast = lastName || "-";
 
@@ -276,7 +288,53 @@ class ContipayService {
   }
 
   /**
-   * Poll payment status from DB (ContiPay confirms via webhook; no external poll URL).
+   * Query ContiPay for current transaction status (used when webhook is delayed/missing).
+   */
+  async fetchGatewayPaymentStatus(merchantRef: string): Promise<{
+    paid: boolean;
+    failed: boolean;
+    status: string;
+    raw?: any;
+  }> {
+    this.ensureConfigured();
+
+    try {
+      const response = await axios.get(`${contipayConfig.getBaseUrl()}/acquire/payment`, {
+        params: {
+          merchantId: contipayConfig.merchantId,
+          merchantRef,
+        },
+        auth: {
+          username: contipayConfig.apiUser,
+          password: contipayConfig.apiSecret,
+        },
+        headers: { Accept: "application/json" },
+        timeout: 30000,
+        httpsAgent: this.httpsAgent,
+        validateStatus: () => true,
+      });
+
+      const data = response.data;
+      const txStatus = String(
+        data?.transaction?.status || data?.status || ""
+      ).toLowerCase();
+
+      LOG(`Gateway status query: ref=${merchantRef} http=${response.status} status=${txStatus}`);
+
+      return {
+        paid: isPaidStatus(txStatus),
+        failed: isFailedStatus(txStatus),
+        status: txStatus || "unknown",
+        raw: data,
+      };
+    } catch (error: any) {
+      LOG_ERR(`Gateway status query failed: ref=${merchantRef} error=${error.message}`);
+      return { paid: false, failed: false, status: "error" };
+    }
+  }
+
+  /**
+   * Poll payment status — checks ContiPay API then local DB.
    */
   async pollAndConfirmPayment(paymentId: string, userId: string): Promise<{
     success: boolean;
@@ -306,31 +364,79 @@ class ContipayService {
         return { success: true, paid: false, status: payment.status, payment };
       }
 
-      const expiryMs = contipayConfig.paymentExpiryMinutes * 60 * 1000;
-      if (payment.createdAt && Date.now() - new Date(payment.createdAt).getTime() > expiryMs) {
-        if (payment.status === "pending") {
-          LOG(`Status poll: payment ${paymentId} expired`);
+      const merchantRef = getPaymentGatewayReference(payment);
+      const awaitingGateway =
+        merchantRef &&
+        !payment.verifiedAt &&
+        (payment.status === "pending" || payment.status === "overdue");
+
+      if (awaitingGateway) {
+        const gatewayStatus = await this.fetchGatewayPaymentStatus(merchantRef);
+        if (gatewayStatus.paid) {
+          await this.markPaymentVerified(payment, {
+            polled: true,
+            gatewayStatus: gatewayStatus.raw,
+          });
+          LOG(`Status poll: payment ${paymentId} verified via ContiPay API`);
+          const updated = await Payment.findById(paymentId);
+          return { success: true, paid: true, status: "completed", payment: updated };
+        }
+        if (gatewayStatus.failed) {
           payment.status = "cancelled";
-          payment.rejectionReason = "Payment expired - no confirmation received within time limit";
+          payment.rejectionReason = `Payment ${gatewayStatus.status} via ContiPay`;
           await payment.save();
-          return { success: true, paid: false, status: "expired", payment };
+          return { success: true, paid: false, status: "cancelled", payment };
         }
       }
 
-      return { success: true, paid: false, status: "pending", payment };
+      const expiryMs = contipayConfig.paymentExpiryMinutes * 60 * 1000;
+      const createdAt = payment.createdAt ? new Date(payment.createdAt).getTime() : 0;
+      const isExpired = createdAt > 0 && Date.now() - createdAt > expiryMs;
+
+      if (isExpired && awaitingGateway) {
+        LOG(`Status poll: payment ${paymentId} expired (gateway timeout)`);
+        payment.status = "cancelled";
+        payment.rejectionReason =
+          "Payment expired - no confirmation received within time limit";
+        await payment.save();
+        return { success: true, paid: false, status: "expired", payment };
+      }
+
+      if (isExpired && payment.status === "pending") {
+        LOG(`Status poll: payment ${paymentId} expired`);
+        payment.status = "cancelled";
+        payment.rejectionReason =
+          "Payment expired - no confirmation received within time limit";
+        await payment.save();
+        return { success: true, paid: false, status: "expired", payment };
+      }
+
+      return {
+        success: true,
+        paid: false,
+        status: payment.status === "overdue" ? "processing" : payment.status,
+        payment,
+      };
     } catch (error: any) {
       LOG_ERR(`Poll and confirm error: ${error.message}`);
       return { success: false, paid: false, status: "error", error: error.message };
     }
   }
 
-  /** Mark payment verified when webhook already processed elsewhere (internal use) */
+  /** Mark payment verified when webhook or poll confirms gateway payment */
   async markPaymentVerified(payment: any, rawResponse: any = { polled: true }): Promise<void> {
-    if (payment.status !== "pending") return;
+    const canVerify =
+      payment.status === "pending" ||
+      (payment.status === "overdue" && (payment.gatewayReference || payment.paynowReference));
+
+    if (!canVerify) return;
 
     payment.status = "verified";
     payment.verifiedAt = new Date();
     payment.paymentDate = new Date();
+    payment.lateFee = 0;
+    payment.daysLate = 0;
+    payment.totalAmount = payment.amount;
     payment.gatewayResponse = {
       provider: "contipay",
       transactionId: "",

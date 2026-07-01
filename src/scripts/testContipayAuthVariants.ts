@@ -5,11 +5,12 @@
 // @ts-nocheck
 import axios from "axios";
 import https from "https";
+import { contipayConfig } from "../config/contipayConfig";
 
 const httpsAgent = new https.Agent({ rejectUnauthorized: false });
-const API_USER = "T09RdjB1RWZWc014cHIrMittZmxFdz09";
-const API_SECRET = "44536e06-9ff0-4734-a88c-b71a61ee069c";
-const MERCHANT_ID = 871;
+const API_USER = contipayConfig.apiUser;
+const API_SECRET = contipayConfig.apiSecret;
+const MERCHANT_ID = contipayConfig.merchantId;
 
 const bases = [
   "https://api2-test.contipay.co.zw",
