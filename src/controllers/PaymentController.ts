@@ -5,6 +5,12 @@ import { paymentRequestService } from "../services/PaymentRequestService";
 import { CommissionService } from "../services/CommissionService";
 import { transactionService } from "../services/TransactionService";
 import { paymentGatewayService } from "../services/PaymentGatewayService";
+import { contipayConfig } from "../config/contipayConfig";
+import {
+  isEcoCashOnlinePayment,
+  isExternalProofPayment,
+  isPaynowOnlinePayment,
+} from "../utils/rentOnlinePayment";
 import { buildGatewayPaymentFields } from "../utils/paymentGatewayFields";
 import { Payment } from "../models/Payment";
 import { Rental } from "../models/Rental";
@@ -44,51 +50,34 @@ export class PaymentController {
       const { rentalId } = req.params;
       const userId = (req as any).user?._id?.toString() || (req as any).user?._id || (req as any).user?.id || (req as any).user?.userId;
       const paymentData = req.body;
+      const paymentMethod = (paymentData.paymentMethod || "").toLowerCase();
 
-      // If payment method is external (not in_app), create payment request instead
-      if (paymentData.paymentMethod && paymentData.paymentMethod !== "in_app") {
-        // External payment - create payment request
-        if (!paymentData.proofOfPayment) {
-          return res.status(400).json({
-            success: false,
-            message: "Proof of payment is required for external payments"
-          });
-        }
-
-        const paymentRequest = await paymentRequestService.createPaymentRequest({
-          tenantId: userId,
-          rentalId: rentalId,
-          amount: paymentData.amount,
-          proofOfPayment: paymentData.proofOfPayment,
-          paymentMethod: paymentData.paymentMethod,
-          notes: paymentData.notes,
-          requestType: "rent"
-        });
-
-        return res.json({
-          success: true,
-          message: "Payment request submitted successfully. Waiting for admin approval.",
-          data: {
-            paymentRequest
-          }
-        });
-      }
-
-      // Online mobile money payment (ContiPay EcoCash / legacy PayNow)
+      // --- Online EcoCash (ContiPay) or PayNow — must run before external-proof branch ---
+      const isOnlineEcoCash = isEcoCashOnlinePayment(paymentMethod);
+      const isOnlinePaynow = isPaynowOnlinePayment(paymentMethod);
       const isOnlineGateway =
-        paymentData.paymentMethod === "contipay" ||
-        paymentData.paymentMethod === "paynow" ||
-        paymentData.phone;
+        isOnlineEcoCash ||
+        isOnlinePaynow ||
+        (!!paymentData.phone && !paymentData.proofOfPayment && !isExternalProofPayment(paymentMethod));
 
       if (isOnlineGateway) {
-        const phone = paymentData.phone;
         const method = paymentData.mobileMethod || "ecocash";
 
-        if (!phone) {
-          return res.status(400).json({
-            success: false,
-            message: "Phone number is required for EcoCash online payments",
-          });
+        let phone: string;
+        if (isOnlinePaynow) {
+          if (!paymentData.phone) {
+            return res.status(400).json({
+              success: false,
+              message: "Phone number is required for PayNow payments",
+            });
+          }
+          phone = paymentData.phone;
+        } else {
+          try {
+            phone = contipayConfig.resolveEcoCashPhone(paymentData.phone);
+          } catch (err: any) {
+            return res.status(400).json({ success: false, message: err.message });
+          }
         }
 
         const rental = await Rental.findById(rentalId);
@@ -114,31 +103,80 @@ export class PaymentController {
         const scheduledPayment = await Payment.findOne({
           rentalId: rental._id,
           paymentType: "rent",
-          status: "pending",
+          status: { $in: ["pending", "overdue"] },
         }).sort({ dueDate: 1 });
 
-        const paymentAmount = scheduledPayment?.amount ?? paymentData.amount;
-        const paymentMetadata = scheduledPayment?.metadata;
+        if (!scheduledPayment) {
+          return res.status(400).json({
+            success: false,
+            message: "No pending rent installment found for this rental.",
+          });
+        }
 
-        const gatewayMeta = { paymentPurpose: "rent" };
+        const installmentDue =
+          scheduledPayment.totalAmount ?? scheduledPayment.amount ?? 0;
 
-        const pendingPayment = await Payment.create({
-          rentalId: rental._id,
-          agreementId: rental.agreementId,
-          propertyId: rental.propertyId,
-          invoiceId: pendingInvoice?._id || null,
-          landlordId: rental.landlordId,
-          tenantId: rental.tenantId,
-          paymentType: paymentData.paymentType || "rent",
-          amount: paymentAmount,
-          totalAmount: paymentAmount,
-          dueDate: new Date(),
-          paymentMethod: "in_app",
-          status: "pending",
-          notes: paymentData.notes,
-          ...(paymentMetadata ? { metadata: paymentMetadata } : {}),
-          ...buildGatewayPaymentFields(reference, gatewayMeta),
-        });
+        const requestedAmount =
+          paymentData.amount != null ? Number(paymentData.amount) : NaN;
+
+        if (!requestedAmount || requestedAmount <= 0 || Number.isNaN(requestedAmount)) {
+          return res.status(400).json({
+            success: false,
+            message: "Payment amount is required and must be greater than zero.",
+          });
+        }
+
+        if (requestedAmount > installmentDue) {
+          return res.status(400).json({
+            success: false,
+            message: `Payment amount cannot exceed amount due ($${installmentDue}).`,
+          });
+        }
+
+        const paymentAmount = requestedAmount;
+        const isFullInstallment = paymentAmount >= installmentDue;
+        const paymentMetadata = isFullInstallment ? scheduledPayment.metadata : undefined;
+
+        const gatewayMeta = { paymentPurpose: "rent", channel: "ecocash" };
+
+        let pendingPayment;
+
+        if (isFullInstallment) {
+          // Reuse the scheduled installment — avoid duplicate payment rows
+          pendingPayment = scheduledPayment;
+          pendingPayment.amount = paymentAmount;
+          pendingPayment.totalAmount = paymentAmount;
+          pendingPayment.lateFee = 0;
+          pendingPayment.daysLate = 0;
+          pendingPayment.status = "pending";
+          pendingPayment.paymentMethod = "in_app";
+          pendingPayment.invoiceId = pendingInvoice?._id || pendingPayment.invoiceId || null;
+          pendingPayment.notes = paymentData.notes ?? pendingPayment.notes;
+          if (paymentMetadata) pendingPayment.metadata = paymentMetadata;
+          Object.assign(pendingPayment, buildGatewayPaymentFields(reference, gatewayMeta));
+          await pendingPayment.save();
+        } else {
+          pendingPayment = await Payment.create({
+            rentalId: rental._id,
+            agreementId: rental.agreementId,
+            propertyId: rental.propertyId,
+            invoiceId: pendingInvoice?._id || null,
+            landlordId: rental.landlordId,
+            tenantId: rental.tenantId,
+            paymentType: paymentData.paymentType || "rent",
+            amount: paymentAmount,
+            totalAmount: paymentAmount,
+            dueDate: scheduledPayment.dueDate,
+            paymentMethod: "in_app",
+            status: "pending",
+            notes: paymentData.notes,
+            metadata: {
+              scheduledPaymentId: scheduledPayment._id.toString(),
+              installmentBalanceBefore: installmentDue,
+            },
+            ...buildGatewayPaymentFields(reference, gatewayMeta),
+          });
+        }
 
         const gatewayResult = await paymentGatewayService.initiateMobilePayment({
           reference,
@@ -168,14 +206,50 @@ export class PaymentController {
 
         return res.status(201).json({
           success: true,
-          message: "Payment initiated. Check your phone for EcoCash payment instructions.",
+          message: contipayConfig.isSandboxMode()
+            ? "EcoCash payment initiated (sandbox test mode). Poll status until confirmed."
+            : "EcoCash payment initiated. Check your phone for the payment prompt.",
           data: {
             paymentId: pendingPayment._id,
+            amount: paymentAmount,
             reference,
+            paymentMethod: "ecocash",
             pollUrl: gatewayResult.pollUrl || null,
             instructions: gatewayResult.instructions,
             statusCheckUrl: `/api/webhooks/payment-status/${pendingPayment._id}`,
             gateway: paymentGatewayService.provider,
+            ...(contipayConfig.isSandboxMode() && {
+              testMode: true,
+              sandboxNote: "EcoCash sandbox number used; user phone ignored in UAT.",
+            }),
+          },
+        });
+      }
+
+      // External payment — proof upload, admin approval
+      if (isExternalProofPayment(paymentMethod)) {
+        if (!paymentData.proofOfPayment) {
+          return res.status(400).json({
+            success: false,
+            message: "Proof of payment is required for external payments",
+          });
+        }
+
+        const paymentRequest = await paymentRequestService.createPaymentRequest({
+          tenantId: userId,
+          rentalId: rentalId,
+          amount: paymentData.amount,
+          proofOfPayment: paymentData.proofOfPayment,
+          paymentMethod: paymentData.paymentMethod,
+          notes: paymentData.notes,
+          requestType: "rent",
+        });
+
+        return res.json({
+          success: true,
+          message: "Payment request submitted successfully. Waiting for admin approval.",
+          data: {
+            paymentRequest,
           },
         });
       }
@@ -183,7 +257,7 @@ export class PaymentController {
       return res.status(400).json({
         success: false,
         message:
-          "Phone number is required for online payments. Send paymentMethod 'contipay' (or 'paynow') and phone in the request body.",
+          "Online rent payment requires paymentMethod 'ecocash'. For bank/cash deposits, include proofOfPayment.",
       });
     } catch (error) {
       next(error);

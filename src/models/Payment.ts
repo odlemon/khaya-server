@@ -197,19 +197,23 @@ paymentSchema.index({ paymentType: 1 });
 // Auto-update status to overdue and calculate late fees
 paymentSchema.pre('save', function(next) {
   const now = new Date();
-  
-  // Calculate days late (only if dueDate exists - for rent payments)
-  if (this.dueDate && this.dueDate < now && this.status === 'pending') {
-    this.status = 'overdue';
+
+  const hasGatewayRef = !!(this.gatewayReference || this.paynowReference);
+  const isInFlightOnline =
+    hasGatewayRef && (this.status === "pending" || this.status === "overdue") && !this.verifiedAt;
+
+  // Do not mark in-flight EcoCash/ContiPay payments overdue while awaiting gateway confirmation
+  if (this.dueDate && this.dueDate < now && this.status === "pending" && !isInFlightOnline) {
+    this.status = "overdue";
     const diffTime = Math.abs(now.getTime() - this.dueDate.getTime());
     this.daysLate = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-    
+
     // Calculate late fee (example: 5% per week, max 20%)
     const weeksLate = Math.ceil(this.daysLate / 7);
     const lateFeePercentage = Math.min(weeksLate * 5, 20) / 100;
     this.lateFee = Math.round(this.amount * lateFeePercentage);
   }
-  
+
   // Calculate total amount
   this.totalAmount = this.amount + (this.lateFee || 0);
   

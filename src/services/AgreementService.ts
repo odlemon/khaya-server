@@ -262,22 +262,71 @@ export class AgreementService {
       .populate("tenantId", "firstName lastName email phone")
       .sort({ createdAt: -1 });
 
-    // Add formatted agreement to each agreement
-    const agreementsWithFormatted = agreements.map(agreement => {
-      try {
-        const formattedAgreement = this.generateFormattedAgreement(agreement);
-        const agreementObj = agreement.toObject();
-        agreementObj.formattedAgreement = formattedAgreement;
-        return agreementObj;
-      } catch (error) {
-        console.error('❌ Error generating formatted agreement for agreement:', agreement._id, error);
-        const agreementObj = agreement.toObject();
-        agreementObj.formattedAgreement = 'Error generating formatted agreement';
-        return agreementObj;
-      }
-    });
+    const agreementsWithFormatted = await Promise.all(
+      agreements.map(async (agreement) => {
+        try {
+          await this.syncEmbeddedSignaturesFromRecords(agreement);
+          const formattedAgreement = this.generateFormattedAgreement(agreement);
+          const agreementObj = agreement.toObject();
+          agreementObj.formattedAgreement = formattedAgreement;
+          return this.enrichAgreementForList(agreementObj);
+        } catch (error) {
+          console.error("❌ Error generating formatted agreement for agreement:", agreement._id, error);
+          const agreementObj = agreement.toObject();
+          agreementObj.formattedAgreement = "Error generating formatted agreement";
+          return this.enrichAgreementForList(agreementObj);
+        }
+      })
+    );
 
     return agreementsWithFormatted;
+  }
+
+  /** Sync Signature collection into embedded fields when missing (list/detail consistency). */
+  private async syncEmbeddedSignaturesFromRecords(agreement: any): Promise<void> {
+    const needsLandlord = !agreement.landlordSignature?.signedAt;
+    const needsTenant = !agreement.tenantSignature?.signedAt;
+    if (!needsLandlord && !needsTenant) return;
+
+    const [landlordSig, tenantSig] = await Promise.all([
+      needsLandlord
+        ? Signature.findOne({ agreementId: agreement._id, userRole: "landlord", isActive: { $ne: false } })
+        : null,
+      needsTenant
+        ? Signature.findOne({ agreementId: agreement._id, userRole: "tenant", isActive: { $ne: false } })
+        : null,
+    ]);
+
+    let changed = false;
+    if (landlordSig && needsLandlord) {
+      agreement.landlordSignature = {
+        signedAt: landlordSig.signedAt,
+        signatureUrl: landlordSig.signatureUrl,
+        ipAddress: landlordSig.ipAddress,
+      };
+      changed = true;
+    }
+    if (tenantSig && needsTenant) {
+      agreement.tenantSignature = {
+        signedAt: tenantSig.signedAt,
+        signatureUrl: tenantSig.signatureUrl,
+        ipAddress: tenantSig.ipAddress,
+        paymentStatus: agreement.tenantSignature?.paymentStatus || "deferred",
+      };
+      changed = true;
+    }
+    if (changed) await agreement.save();
+  }
+
+  /** Explicit flags for agreement list cards (sign status, fee deferral). */
+  private enrichAgreementForList(agreementObj: any): any {
+    agreementObj.landlordSigned = !!agreementObj.landlordSignature?.signedAt;
+    agreementObj.tenantSigned = !!agreementObj.tenantSignature?.signedAt;
+    agreementObj.bothSigned = agreementObj.landlordSigned && agreementObj.tenantSigned;
+    agreementObj.canSignWithoutPayment = true;
+    agreementObj.paymentStatus =
+      agreementObj.tenantSignature?.paymentStatus || "no_payment";
+    return agreementObj;
   }
 
   /**

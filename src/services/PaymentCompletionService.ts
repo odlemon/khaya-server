@@ -147,7 +147,43 @@ class PaymentCompletionService {
     await escrowService.addToEscrow(payment, { deductions, revenueSourceIds });
     await escrowService.updateEscrowStatus(payment._id.toString(), "held");
 
+    await this.applyPaymentToScheduledInstallment(payment);
+
     LOG(`Post-payment rent done: payment ${payment._id}`);
+  }
+
+  /**
+   * After a partial gateway payment, reduce the linked scheduled installment balance.
+   */
+  private async applyPaymentToScheduledInstallment(payment: any): Promise<void> {
+    const scheduledId = payment.metadata?.scheduledPaymentId;
+    if (!scheduledId || scheduledId === payment._id?.toString()) return;
+
+    const { Payment } = await import("../models/Payment");
+    const scheduled = await Payment.findById(scheduledId);
+    if (!scheduled || ["verified", "paid", "cancelled"].includes(scheduled.status)) {
+      return;
+    }
+
+    const balanceBefore =
+      Number(payment.metadata?.installmentBalanceBefore) ||
+      scheduled.totalAmount ||
+      scheduled.amount ||
+      0;
+    const remaining = Math.max(0, balanceBefore - payment.amount);
+
+    if (remaining <= 0) {
+      scheduled.status = "cancelled";
+      scheduled.rejectionReason = `Installment fulfilled via online payment ${payment._id}`;
+      await scheduled.save();
+      return;
+    }
+
+    scheduled.amount = remaining;
+    scheduled.totalAmount = remaining;
+    scheduled.lateFee = 0;
+    scheduled.status = "pending";
+    await scheduled.save();
   }
 
   private async processTenantSubscriptionPostPayment(payment: any, meta: any): Promise<void> {
