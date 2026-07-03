@@ -12,6 +12,7 @@ import {
   isMessageReadByUser,
   unreadMessagesFilterForUser,
 } from "../utils/messageReadStatus";
+import { purgeInactiveChats, purgeOrphanMessages } from "./ChatRetentionService";
 
 export interface CreateMessageData {
   chatId: string;
@@ -115,7 +116,8 @@ export class ChatService {
       chat = new Chat({
         participants: [tenantIdStr, landlordIdStr],
         propertyId: propertyIdStr,
-        isActive: true
+        isActive: true,
+        lastActivityAt: new Date(),
       });
       await chat.save();
       await chat.populate("participants", "firstName lastName email role profile.avatar");
@@ -136,6 +138,13 @@ export class ChatService {
    * Handles old chats without propertyId by attempting to link them via Connections
    */
   async getUserChats(userId: string, userRole: string): Promise<any[]> {
+    purgeInactiveChats().catch((err) => {
+      console.error("Background chat retention purge failed:", err.message || err);
+    });
+    purgeOrphanMessages().catch((err) => {
+      console.error("Background orphan message purge failed:", err.message || err);
+    });
+
     const chats = await Chat.find({
       participants: userId,
       isActive: true

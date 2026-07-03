@@ -10,9 +10,20 @@ export interface IChat extends Document {
     timestamp: Date;
   };
   isActive: boolean;
+  /** Last conversation activity — used for inactivity auto-delete (TTL) */
+  lastActivityAt: Date;
+  metadata?: {
+    retentionTestDummy?: boolean;
+    testRunId?: string;
+    [key: string]: unknown;
+  };
   createdAt: Date;
   updatedAt: Date;
 }
+
+/** Chats with no activity for this long are auto-deleted (5 days). */
+export const CHAT_INACTIVITY_TTL_SECONDS = 5 * 24 * 60 * 60;
+export const CHAT_INACTIVITY_TTL_DAYS = 5;
 
 export interface IMessage extends Document {
   chatId: mongoose.Types.ObjectId;
@@ -90,7 +101,16 @@ const chatSchema = new Schema<IChat>({
   isActive: {
     type: Boolean,
     default: true
-  }
+  },
+  lastActivityAt: {
+    type: Date,
+    default: Date.now,
+    required: true,
+  },
+  metadata: {
+    type: Schema.Types.Mixed,
+    default: undefined,
+  },
 }, {
   timestamps: true
 });
@@ -195,6 +215,10 @@ const messageSchema = new Schema<IMessage>({
 chatSchema.index({ participants: 1 });
 chatSchema.index({ propertyId: 1 });
 chatSchema.index({ "lastMessage.timestamp": -1 });
+chatSchema.index(
+  { lastActivityAt: 1 },
+  { expireAfterSeconds: CHAT_INACTIVITY_TTL_SECONDS }
+);
 
 messageSchema.index({ chatId: 1, createdAt: -1 });
 messageSchema.index({ senderId: 1 });
@@ -210,10 +234,11 @@ chatSchema.virtual("unreadCount", {
   match: { isRead: false }
 });
 
-// Pre-save middleware to update last message
+// Pre-save middleware to update last message and activity timestamp
 chatSchema.pre("save", function(next) {
   if (this.isModified("lastMessage")) {
     this.updatedAt = new Date();
+    this.lastActivityAt = new Date();
   }
   next();
 });

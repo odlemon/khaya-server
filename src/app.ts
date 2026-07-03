@@ -14,6 +14,8 @@ import "./utils/googleOAuth";
 import SocketService from "./services/SocketService"
 import { setSocketService } from "./services/realtimeRegistry"
 import { getSocketCorsOrigins } from "./utils/socketCors"
+import { startChatRetentionWatcher, stopChatRetentionWatcher } from "./services/ChatRetentionWatcher"
+import { ensureChatRetentionTtlIndex } from "./services/ChatRetentionService"
 
 import connectionRoutes from "./routes/connectionRoutes"
 
@@ -160,6 +162,9 @@ const startServer = async (): Promise<void> => {
   try {
     await dbConnection.connect()
 
+    await ensureChatRetentionTtlIndex()
+    startChatRetentionWatcher()
+
     // Find an available port
     const port = await getServerPort()
 
@@ -179,6 +184,7 @@ const gracefulShutdown = async (signal: string): Promise<void> => {
   logger.info(`Received ${signal}. Shutting down gracefully...`)
 
   try {
+    await stopChatRetentionWatcher()
     await dbConnection.disconnect()
     logger.info("Server shut down successfully")
     process.exit(0)
