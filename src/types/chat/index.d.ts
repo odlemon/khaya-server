@@ -10,6 +10,7 @@ export interface IChat {
     timestamp: Date;
   };
   isActive: boolean;
+  lastActivityAt: Date;
   createdAt: Date;
   updatedAt: Date;
   unreadCount?: number;

@@ -22,6 +22,8 @@ Complete guide for implementing WebSocket-based real-time chat with Vue.js 3 + P
 - Socket.IO Client
 - Axios (for HTTP requests)
 
+**Chat retention:** Chats with no message activity for **5 days** are automatically removed by the backend. If a user opens a deleted chat, the API returns **404** — refresh the chat list after long idle periods.
+
 ---
 
 ## Installation
