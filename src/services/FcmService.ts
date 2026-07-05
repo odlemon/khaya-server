@@ -35,9 +35,24 @@ export interface SendChatPushParams {
   recipientUserId: string;
 }
 
+function stringifyDataPayload(data: Record<string, unknown>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(data)) {
+    if (value === undefined || value === null) continue;
+    out[key] = typeof value === "string" ? value : String(value);
+  }
+  return out;
+}
+
 class FcmService {
   canSend(): boolean {
     return isFcmEnabled() && isFirebaseInitialized();
+  }
+
+  getSkipReason(): string | null {
+    if (!isFcmEnabled()) return "fcm_disabled";
+    if (!isFirebaseInitialized()) return "no_firebase_init";
+    return null;
   }
 
   async wasAlreadySent(
@@ -120,13 +135,19 @@ class FcmService {
     message: SendChatPushParams["message"];
     sender: SendChatPushParams["sender"];
     landlordId?: string;
+    recipientLabel?: string;
   }): Promise<number> {
-    if (!this.canSend()) {
+    const label = params.recipientLabel || params.recipientUserId;
+
+    const skipReason = this.getSkipReason();
+    if (skipReason) {
+      logger.info(`[FCM] skip | reason=${skipReason} to=${label}`);
       return 0;
     }
 
     const tokens = await pushTokenService.getTokensForUser(params.recipientUserId, "android");
     if (!tokens.length) {
+      logger.info(`[FCM] skip | reason=no_device_token to=${label} userId=${params.recipientUserId}`);
       return 0;
     }
 
@@ -141,6 +162,92 @@ class FcmService {
       });
       if (ok) sent++;
     }
+    return sent;
+  }
+
+  async sendAppPushToRecipient(params: {
+    recipientUserId: string;
+    notificationId: string;
+    title: string;
+    body: string;
+    type: string;
+    data?: Record<string, unknown>;
+    recipientLabel?: string;
+  }): Promise<number> {
+    const label = params.recipientLabel || params.recipientUserId;
+
+    const skipReason = this.getSkipReason();
+    if (skipReason) {
+      logger.info(`[FCM] skip | reason=${skipReason} to=${label} type=${params.type}`);
+      return 0;
+    }
+
+    const messaging = getFirebaseMessaging();
+    if (!messaging) {
+      logger.info(`[FCM] skip | reason=no_firebase_init to=${label} type=${params.type}`);
+      return 0;
+    }
+
+    const tokens = await pushTokenService.getTokensForUser(params.recipientUserId, "android");
+    if (!tokens.length) {
+      logger.info(
+        `[FCM] skip | reason=no_device_token to=${label} userId=${params.recipientUserId} type=${params.type}`
+      );
+      return 0;
+    }
+
+    const dataPayload = stringifyDataPayload({
+      type: params.type,
+      notificationId: params.notificationId,
+      ...(params.data || {}),
+    });
+
+    let sent = 0;
+    for (const { token } of tokens) {
+      const dedupeId = params.notificationId;
+      if (await this.wasAlreadySent(dedupeId, params.recipientUserId, token)) {
+        logger.info(
+          `[FCM] skip duplicate | notificationId=${dedupeId} userId=${params.recipientUserId} type=${params.type}`
+        );
+        continue;
+      }
+
+      logger.info(
+        `[FCM] send app | type=${params.type} notificationId=${dedupeId} recipientUserId=${params.recipientUserId} tokenPrefix=${token.slice(0, 12)}`
+      );
+
+      try {
+        await messaging.send({
+          token,
+          notification: { title: params.title, body: params.body },
+          data: dataPayload,
+          android: {
+            priority: "high",
+            notification: {
+              channelId: FCM_ANDROID_CHANNEL,
+              icon: FCM_ANDROID_ICON,
+              sound: FCM_ANDROID_SOUND,
+            },
+          },
+        });
+
+        await FcmPushLog.create({
+          messageId: new Types.ObjectId(dedupeId),
+          recipientUserId: new Types.ObjectId(params.recipientUserId),
+          token,
+          sentAt: new Date(),
+        });
+        sent++;
+      } catch (error: any) {
+        logger.error(`[FCM] failed | code=${error?.code} message=${error?.message} type=${params.type}`);
+
+        if (isStaleTokenError(error)) {
+          await pushTokenService.removeTokenByValue(token);
+          logger.info(`[FCM] removed stale token | prefix=${token.slice(0, 12)}`);
+        }
+      }
+    }
+
     return sent;
   }
 }

@@ -3,8 +3,7 @@
  * FCM integration test — token storage + Firebase init + optional live push.
  *
  * Run: npx ts-node src/scripts/testFcmSetup.ts
- * With live push: place config/firebase-service-account.json then pass token as arg:
- *   npx ts-node src/scripts/testFcmSetup.ts <fcm_device_token>
+ * With live push: npx ts-node src/scripts/testFcmSetup.ts <fcm_device_token>
  */
 import dotenv from "dotenv";
 import mongoose from "mongoose";
@@ -13,7 +12,7 @@ import {
   isFirebaseInitialized,
   isFcmEnabled,
 } from "../config/firebaseAdmin";
-import { FIREBASE_SERVICE_ACCOUNT_PATH } from "../config/fcmConfig";
+import { FCM_PROJECT_ID } from "../config/fcmConfig";
 import { DeviceToken } from "../models/DeviceToken";
 import { User } from "../models/User";
 import { pushTokenService } from "../services/PushTokenService";
@@ -23,7 +22,7 @@ dotenv.config();
 
 async function main() {
   console.log("=== FCM integration test ===\n");
-  console.log(`Service account path: ${FIREBASE_SERVICE_ACCOUNT_PATH}`);
+  console.log(`FCM project (hardcoded): ${FCM_PROJECT_ID}`);
 
   initializeFirebaseAdmin();
 
@@ -67,9 +66,9 @@ async function main() {
     });
     console.log(ok ? "PASS: live FCM push sent" : "FAIL: live FCM push");
   } else if (liveToken && !isFirebaseInitialized()) {
-    console.log("\nSKIP live push: add config/firebase-service-account.json first");
+    console.log("\nSKIP live push: Firebase Admin failed to initialize");
   } else if (!isFirebaseInitialized()) {
-    console.log("\nSKIP live push: no service account file (see config/firebase-service-account.example.json)");
+    console.log("\nSKIP live push: Firebase Admin not initialized");
   } else {
     console.log("\nSKIP live push: pass device token as CLI arg to test send");
   }

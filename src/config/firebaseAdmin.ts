@@ -1,11 +1,7 @@
 // @ts-nocheck
-import fs from "fs";
 import admin from "firebase-admin";
 import { logger } from "../utils/logger";
-import {
-  FCM_ENABLED,
-  FIREBASE_SERVICE_ACCOUNT_PATH,
-} from "./fcmConfig";
+import { FCM_ENABLED, FIREBASE_SERVICE_ACCOUNT } from "./fcmConfig";
 
 let initialized = false;
 
@@ -28,21 +24,14 @@ export function initializeFirebaseAdmin(): void {
   }
 
   try {
-    if (!fs.existsSync(FIREBASE_SERVICE_ACCOUNT_PATH)) {
-      logger.warn(
-        `[FCM] Service account not found at ${FIREBASE_SERVICE_ACCOUNT_PATH} — push disabled until file is added`
-      );
-      return;
-    }
-
-    const serviceAccount = JSON.parse(
-      fs.readFileSync(FIREBASE_SERVICE_ACCOUNT_PATH, "utf8")
+    const credential = admin.credential.cert(
+      FIREBASE_SERVICE_ACCOUNT as admin.ServiceAccount
     );
-    const credential = admin.credential.cert(serviceAccount);
-
     admin.initializeApp({ credential });
     initialized = true;
-    logger.info(`[FCM] Firebase Admin initialized (project=${serviceAccount.project_id})`);
+    logger.info(
+      `[FCM] Firebase Admin initialized (project=${FIREBASE_SERVICE_ACCOUNT.project_id})`
+    );
   } catch (error: any) {
     logger.error(`[FCM] Firebase Admin init failed: ${error.message}`);
   }

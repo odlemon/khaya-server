@@ -16,7 +16,7 @@ import { setSocketService } from "./services/realtimeRegistry"
 import { getSocketCorsOrigins } from "./utils/socketCors"
 import { startChatRetentionWatcher, stopChatRetentionWatcher } from "./services/ChatRetentionWatcher"
 import { ensureChatRetentionTtlIndex } from "./services/ChatRetentionService"
-import { initializeFirebaseAdmin } from "./config/firebaseAdmin"
+import { initializeFirebaseAdmin, isFirebaseInitialized, isFcmEnabled } from "./config/firebaseAdmin"
 
 import connectionRoutes from "./routes/connectionRoutes"
 
@@ -66,6 +66,10 @@ app.get("/health", (req, res) => {
     timestamp: new Date().toISOString(),
     environment: envConfig.get("NODE_ENV"),
     database: dbConnection.getConnection().readyState === 1 ? "connected" : "disconnected",
+    fcm: {
+      enabled: isFcmEnabled(),
+      firebaseInitialized: isFirebaseInitialized(),
+    },
   })
 })
 

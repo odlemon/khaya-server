@@ -31,8 +31,8 @@ class SocketService {
   private io: SocketIOServer
   private onlineUsers: Map<string, OnlineUser> = new Map()
   private userSockets: Map<string, Set<string>> = new Map()
-  /** userId -> Set of chatIds the user has joined via join_chat */
-  private userChatRooms: Map<string, Set<string>> = new Map()
+  /** socketId -> Set of chatIds joined via join_chat on that socket */
+  private socketChatRooms: Map<string, Set<string>> = new Map()
 
   constructor(io: SocketIOServer) {
     this.io = io
@@ -73,19 +73,19 @@ class SocketService {
     })
   }
 
-  private trackChatJoin(userId: string, chatId: string) {
-    if (!this.userChatRooms.has(userId)) {
-      this.userChatRooms.set(userId, new Set())
+  private trackChatJoin(socketId: string, chatId: string) {
+    if (!this.socketChatRooms.has(socketId)) {
+      this.socketChatRooms.set(socketId, new Set())
     }
-    this.userChatRooms.get(userId)!.add(chatId)
+    this.socketChatRooms.get(socketId)!.add(chatId)
   }
 
-  private trackChatLeave(userId: string, chatId: string) {
-    const rooms = this.userChatRooms.get(userId)
+  private trackChatLeave(socketId: string, chatId: string) {
+    const rooms = this.socketChatRooms.get(socketId)
     if (rooms) {
       rooms.delete(chatId)
       if (rooms.size === 0) {
-        this.userChatRooms.delete(userId)
+        this.socketChatRooms.delete(socketId)
       }
     }
   }
@@ -126,7 +126,7 @@ class SocketService {
           }
 
           socket.join(`chat:${chatId}`)
-          this.trackChatJoin(userId, chatId)
+          this.trackChatJoin(socketId, chatId)
           console.log(`[REALTIME] join_chat OK | ${userName} chatId=${chatId}`)
           logger.info(`User ${userId} joined chat ${chatId}`)
           socket.emit('joined_chat', { chatId })
@@ -137,7 +137,7 @@ class SocketService {
 
       socket.on('leave_chat', (chatId: string) => {
         socket.leave(`chat:${chatId}`)
-        this.trackChatLeave(userId, chatId)
+        this.trackChatLeave(socketId, chatId)
         console.log(`[REALTIME] leave_chat | ${userName} chatId=${chatId}`)
         logger.info(`User ${userId} left chat ${chatId}`)
       })
@@ -190,7 +190,7 @@ class SocketService {
       })
 
       socket.on('disconnect', () => {
-        this.userChatRooms.delete(userId)
+        this.socketChatRooms.delete(socketId)
         this.removeOnlineUser(userId, socketId)
         console.log(`[REALTIME] socket disconnected | ${userName} socketId=${socketId}`)
         logger.info(`User ${userId} disconnected (socket ${socketId})`)
@@ -230,7 +230,16 @@ class SocketService {
   }
 
   public isUserInChatRoom(userId: string, chatId: string): boolean {
-    return this.userChatRooms.get(userId)?.has(chatId) || false
+    const socketIds = this.userSockets.get(userId)
+    if (!socketIds) {
+      return false
+    }
+    for (const sid of socketIds) {
+      if (this.socketChatRooms.get(sid)?.has(chatId)) {
+        return true
+      }
+    }
+    return false
   }
 
   public async emitNewMessage(chatId: string, message: any) {

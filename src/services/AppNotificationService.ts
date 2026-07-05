@@ -3,6 +3,8 @@ import { notificationService, CreateNotificationInput } from "./NotificationServ
 import { getSocketService } from "./realtimeRegistry";
 import { getActiveAdminUserIds } from "../utils/adminRecipients";
 import { INotification, NotificationType } from "../models/Notification";
+import { fcmService } from "./FcmService";
+import { logger } from "../utils/logger";
 
 export type AppNotifyInput = CreateNotificationInput;
 
@@ -30,6 +32,20 @@ class AppNotificationService {
     if (socketService) {
       socketService.emitNotificationCreated(input.userId, payload);
       socketService.emitChatNotification(input.userId, payload);
+    }
+
+    const notificationId = saved._id.toString();
+    const sent = await fcmService.sendAppPushToRecipient({
+      recipientUserId: input.userId,
+      notificationId,
+      title: saved.title,
+      body: saved.body,
+      type: saved.type,
+      data: saved.data as Record<string, unknown>,
+    });
+
+    if (sent > 0) {
+      logger.info(`[FCM] delivered ${sent} app push(es) | type=${saved.type} to userId=${input.userId}`);
     }
 
     return saved;
