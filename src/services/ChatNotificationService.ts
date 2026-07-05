@@ -7,6 +7,7 @@ import { resolveUserDisplayNames } from "../utils/userDisplayName";
 import { getMessagePreview, getSenderDisplayName } from "../utils/pushNotificationFormat";
 import { fcmService } from "./FcmService";
 import { isFcmEnabled } from "../config/firebaseAdmin";
+import { logger } from "../utils/logger";
 
 class ChatNotificationService {
   async dispatch(notification: ChatNotification): Promise<void> {
@@ -102,6 +103,7 @@ class ChatNotificationService {
     if (fcmActive && isFcmEnabled() && !isViewingChat && messageId) {
       const sent = await fcmService.sendChatPushToRecipient({
         recipientUserId: recipientId,
+        recipientLabel: toName,
         message: {
           _id: messageId,
           chatId,
@@ -115,6 +117,16 @@ class ChatNotificationService {
       if (sent > 0) {
         console.log(`[FCM] delivered ${sent} push(es) | messageId=${messageId} to=${toName}`);
       }
+    } else {
+      let reason = "unknown";
+      if (!fcmActive || !isFcmEnabled()) {
+        reason = fcmService.getSkipReason() || "no_firebase_init";
+      } else if (isViewingChat) {
+        reason = "viewing_chat";
+      } else if (!messageId) {
+        reason = "no_message_id";
+      }
+      logger.info(`[FCM] skip | reason=${reason} to=${toName} chatId=${chatId} type=${type}`);
     }
   }
 }
