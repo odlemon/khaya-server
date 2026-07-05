@@ -70,7 +70,11 @@ export interface ChatNotification {
   senderId: string;
   chatId: string;
   propertyId: string;
-  message: string;
+  /** @deprecated use messageContent — kept for callers that still pass summary text */
+  message?: string;
+  messageContent?: string;
+  messageType?: string;
+  landlordId?: string;
   data?: any;
 }
 
@@ -206,7 +210,7 @@ export class ChatService {
     const { chatId, senderId, senderRole, messageType = "text", content, attachments } = data;
 
     // Verify chat exists and user is participant
-    const chat = await Chat.findById(chatId).populate("participants", "role");
+    const chat = await Chat.findById(chatId).populate("participants", "firstName lastName role");
     if (!chat) {
       throw new Error("Chat not found");
     }
@@ -304,15 +308,15 @@ export class ChatService {
         ? "move_in_request"
         : "new_message";
 
-    const senderName = `${message.senderId.firstName} ${message.senderId.lastName}`.trim();
-    const notificationBody =
-      notificationType === "new_message"
-        ? isPrivate
-          ? `Private message from ${senderName}`
-          : `New message from ${senderName}`
-        : content.substring(0, 200);
-
     recipientIds.delete(senderIdStr);
+
+    const landlordParticipant = chat.participants.find(
+      (p: any) => p?.role === "landlord"
+    );
+    const landlordId =
+      landlordParticipant?._id?.toString?.() ||
+      landlordParticipant?.toString?.() ||
+      "";
 
     console.log(
       `[REALTIME] notifying ${recipientIds.size} recipient(s) | chatId=${chatId} private=${isPrivate}${isPrivate && taggedUser ? ` tag=@${taggedUser}` : ""}`
@@ -324,9 +328,15 @@ export class ChatService {
         recipientId,
         senderId: senderId,
         chatId: chatId,
-        propertyId: chat.propertyId.toString(),
-        message: notificationBody,
-        data: { messageId: message._id, isPrivate: visibleTo.length > 0 },
+        propertyId: chat.propertyId?.toString?.() || String(chat.propertyId),
+        messageContent: content,
+        messageType,
+        landlordId,
+        data: {
+          messageId: message._id,
+          isPrivate: visibleTo.length > 0,
+          landlordId,
+        },
       });
     }
 

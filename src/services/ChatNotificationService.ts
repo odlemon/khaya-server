@@ -4,18 +4,23 @@ import { ChatNotification } from "./ChatService";
 import { notificationService } from "./NotificationService";
 import { getSocketService } from "./realtimeRegistry";
 import { resolveUserDisplayNames } from "../utils/userDisplayName";
-
-const TYPE_TITLES: Record<ChatNotification["type"], string> = {
-  new_message: "New message",
-  viewing_request: "Viewing request",
-  move_in_request: "Move-in request",
-  viewing_response: "Viewing request update",
-  move_in_response: "Move-in request update",
-};
+import { getMessagePreview, getSenderDisplayName } from "../utils/pushNotificationFormat";
+import { fcmService } from "./FcmService";
+import { isFcmEnabled } from "../config/firebaseAdmin";
 
 class ChatNotificationService {
   async dispatch(notification: ChatNotification): Promise<void> {
-    const { recipientId, senderId, chatId, propertyId, type, message, data } = notification;
+    const {
+      recipientId,
+      senderId,
+      chatId,
+      propertyId,
+      type,
+      messageContent,
+      messageType,
+      landlordId,
+      data,
+    } = notification;
 
     if (recipientId === senderId) {
       console.log(`[REALTIME] notification skipped (sender is recipient) | type=${type}`);
@@ -31,29 +36,34 @@ class ChatNotificationService {
     );
 
     const socketService = getSocketService();
-    const suppressBanner =
-      socketService?.isUserInChatRoom(recipientId, chatId) ?? false;
+    const isViewingChat = socketService?.isUserInChatRoom(recipientId, chatId) ?? false;
+    const fcmActive = fcmService.canSend();
+    const suppressBanner = isViewingChat || fcmActive;
 
-    let title = TYPE_TITLES[type] || "Chat notification";
-    let body = message;
+    const sender = senderId
+      ? await User.findById(senderId).select("firstName lastName role").lean()
+      : null;
 
-    if (senderId) {
-      const sender = await User.findById(senderId).select("firstName lastName");
-      if (sender) {
-        title = `${sender.firstName} ${sender.lastName}`.trim() || title;
-      }
-    }
+    const title = getSenderDisplayName(sender);
+    const previewSource = messageContent ?? notification.message ?? "";
+    const body = getMessagePreview(previewSource, messageType || "text");
+
+    const messageId = data?.messageId?.toString?.() || data?.messageId || "";
+    const resolvedLandlordId = landlordId || data?.landlordId || "";
 
     const saved = await notificationService.create({
       userId: recipientId,
       type,
       title,
-      body: suppressBanner ? body.substring(0, 120) : body,
+      body,
       data: {
         chatId,
         propertyId,
         senderId,
-        suppressBanner,
+        messageId,
+        landlordId: resolvedLandlordId,
+        senderName: title,
+        isPrivate: data?.isPrivate ?? false,
         ...(data || {}),
       },
     });
@@ -64,25 +74,47 @@ class ChatNotificationService {
     }
 
     console.log(
-      `[REALTIME] notification saved | id=${saved._id} to=${toName} suppressBanner=${suppressBanner}`
+      `[REALTIME] notification saved | id=${saved._id} to=${toName} suppressBanner=${suppressBanner} viewing=${isViewingChat}`
     );
 
-    const payload = {
-      notification: {
-        _id: saved._id,
-        userId: saved.userId,
-        type: saved.type,
-        title: saved.title,
-        body: saved.body,
-        data: saved.data,
-        read: saved.read,
-        createdAt: saved.createdAt,
+    const notificationPayload = {
+      _id: saved._id,
+      userId: saved.userId,
+      type: saved.type,
+      title: saved.title,
+      body: saved.body,
+      read: saved.read,
+      createdAt: saved.createdAt,
+      suppressBanner,
+      data: {
+        ...saved.data,
+        messageId: String(messageId),
+        chatId: String(chatId),
+        landlordId: String(resolvedLandlordId),
+        senderName: title,
       },
     };
 
     if (socketService) {
-      socketService.emitNotificationCreated(recipientId, payload);
-      socketService.emitChatNotification(recipientId, payload);
+      socketService.emitNotificationCreated(recipientId, { notification: notificationPayload });
+    }
+
+    if (fcmActive && isFcmEnabled() && !isViewingChat && messageId) {
+      const sent = await fcmService.sendChatPushToRecipient({
+        recipientUserId: recipientId,
+        message: {
+          _id: messageId,
+          chatId,
+          content: previewSource,
+          messageType: messageType || "text",
+          createdAt: saved.createdAt,
+        },
+        sender,
+        landlordId: resolvedLandlordId,
+      });
+      if (sent > 0) {
+        console.log(`[FCM] delivered ${sent} push(es) | messageId=${messageId} to=${toName}`);
+      }
     }
   }
 }
