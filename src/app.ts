@@ -16,6 +16,7 @@ import { setSocketService } from "./services/realtimeRegistry"
 import { getSocketCorsOrigins } from "./utils/socketCors"
 import { startChatRetentionWatcher, stopChatRetentionWatcher } from "./services/ChatRetentionWatcher"
 import { ensureChatRetentionTtlIndex } from "./services/ChatRetentionService"
+import { initializeFirebaseAdmin } from "./config/firebaseAdmin"
 
 import connectionRoutes from "./routes/connectionRoutes"
 
@@ -163,6 +164,7 @@ const startServer = async (): Promise<void> => {
     await dbConnection.connect()
 
     await ensureChatRetentionTtlIndex()
+    initializeFirebaseAdmin()
     startChatRetentionWatcher()
 
     // Find an available port

@@ -1,6 +1,7 @@
 // @ts-nocheck
 import { Request, Response, NextFunction } from "express";
 import { notificationService } from "../services/NotificationService";
+import { pushTokenService } from "../services/PushTokenService";
 
 export class NotificationController {
   async list(req: Request, res: Response, next: NextFunction) {
@@ -69,6 +70,31 @@ export class NotificationController {
         success: true,
         message: "All notifications marked as read",
         data: { modifiedCount },
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async registerDeviceToken(req: Request, res: Response, next: NextFunction) {
+    try {
+      const userId = (req as any).user._id.toString();
+      const { token, platform = "android" } = req.body;
+
+      if (!token || typeof token !== "string") {
+        return res.status(400).json({
+          success: false,
+          message: "FCM token is required",
+        });
+      }
+
+      const normalizedPlatform = platform === "ios" ? "ios" : "android";
+
+      await pushTokenService.upsertToken(userId, token, normalizedPlatform);
+
+      res.json({
+        success: true,
+        message: "Device token registered",
       });
     } catch (error) {
       next(error);
