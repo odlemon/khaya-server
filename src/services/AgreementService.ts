@@ -6,6 +6,7 @@ import { AgreementTemplate, IAgreementTemplate } from "../models/AgreementTempla
 import { Signature, ISignature } from "../models/Signature";
 import { Types } from "mongoose";
 import crypto from "crypto";
+import { assertTenantHasNoActiveRental } from "../utils/tenantRentalLimits";
 
 export interface CreateAgreementData {
   // Required - Selection
@@ -154,6 +155,8 @@ export class AgreementService {
     if (existingAgreement) {
       throw new Error("Property already has an active or pending agreement");
     }
+
+    await assertTenantHasNoActiveRental(data.tenantId.toString());
 
     const { agreementFeeService } = await import("./AgreementFeeService");
     const agreementFeeAmount = agreementFeeService.calculateFeeForProperty(property as any);

@@ -9,6 +9,10 @@ import { emailNotificationService } from "../services/EmailNotificationService";
 import { appNotificationService } from "../services/AppNotificationService";
 import { enrichTenantConnections, applyLandlordConnectionListFilter, LANDLORD_CLEARABLE_CONNECTION_STATUSES } from "../utils/connectionPipeline";
 import { emitChatMessageRealtime } from "../utils/chatRealtime";
+import {
+  findTenantActiveRental,
+  TENANT_ACTIVE_RENTAL_MESSAGE,
+} from "../utils/tenantRentalLimits";
 
 export class ConnectionController {
 
@@ -63,6 +67,15 @@ export class ConnectionController {
         return res.status(400).json({
           success: false,
           message: "Property does not belong to this landlord"
+        });
+      }
+
+      const tenantActiveRental = await findTenantActiveRental(userId.toString());
+      if (tenantActiveRental) {
+        return res.status(409).json({
+          success: false,
+          code: "TENANT_ALREADY_HAS_ACTIVE_RENTAL",
+          message: TENANT_ACTIVE_RENTAL_MESSAGE,
         });
       }
 
@@ -350,6 +363,19 @@ export class ConnectionController {
           success: false,
           message: "Connection request has already been responded to"
         });
+      }
+
+      if (status === "accepted") {
+        const tenantActiveRental = await findTenantActiveRental(
+          connection.tenantId.toString()
+        );
+        if (tenantActiveRental) {
+          return res.status(409).json({
+            success: false,
+            code: "TENANT_ALREADY_HAS_ACTIVE_RENTAL",
+            message: TENANT_ACTIVE_RENTAL_MESSAGE,
+          });
+        }
       }
 
       // Update connection
@@ -689,6 +715,17 @@ export class ConnectionController {
         return res.status(400).json({
           success: false,
           message: "Connection is not in pending status"
+        });
+      }
+
+      const tenantActiveRental = await findTenantActiveRental(
+        connection.tenantId.toString()
+      );
+      if (tenantActiveRental) {
+        return res.status(409).json({
+          success: false,
+          code: "TENANT_ALREADY_HAS_ACTIVE_RENTAL",
+          message: TENANT_ACTIVE_RENTAL_MESSAGE,
         });
       }
 
