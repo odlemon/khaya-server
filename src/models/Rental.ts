@@ -96,6 +96,15 @@ rentalSchema.index({ propertyId: 1 });
 rentalSchema.index({ landlordId: 1 });
 rentalSchema.index({ tenantId: 1 });
 rentalSchema.index({ status: 1 });
+/** One active/suspended rental per tenant */
+rentalSchema.index(
+  { tenantId: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { status: { $in: ["active", "suspended"] } },
+    name: "tenant_single_active_rental",
+  }
+);
 
 // Virtual for rental duration
 rentalSchema.virtual('duration').get(function() {

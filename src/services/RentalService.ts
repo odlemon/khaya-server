@@ -13,6 +13,7 @@ import {
   getRentalCapabilities,
 } from "../utils/rentalCapabilities";
 import { enrichRentalForApi } from "../utils/enrichRentalResponse";
+import { assertTenantHasNoActiveRental } from "../utils/tenantRentalLimits";
 
 export class RentalService {
   /**
@@ -81,6 +82,9 @@ export class RentalService {
       await this.markPropertyAsRented(agreement.propertyId);
       return existingRental;
     }
+
+    const tenantIdStr = agreement.tenantId?.toString?.() || String(agreement.tenantId);
+    await assertTenantHasNoActiveRental(tenantIdStr);
 
     // Create rental
     const rental = new Rental({
