@@ -7,6 +7,8 @@ import { TwoFactorAuthService } from "../services/TwoFactorAuthService";
 import { PasswordResetService } from "../services/PasswordResetService";
 import jwt from "jsonwebtoken";
 import { JWT_SECRET, JWT_EXPIRES_IN } from "../config/jwtConfig";
+import { buildAuthLoginPayload } from "../utils/authLoginPayload";
+import { resolveStaffAuthContext, isStaffPortalRole } from "../utils/staffAuth";
 
 export class AuthController {
       async register(req: Request, res: Response, next: NextFunction) {
@@ -155,12 +157,13 @@ export class AuthController {
         });
       }
 
-      // Inactive: unverified new signup (needs PIN) vs soft-deleted (verified, then closed)
+      // Inactive: unverified new signup (needs PIN) vs soft-deleted / deactivated (verified)
       if (!user.isActive) {
         if (user.isVerified) {
           return res.status(401).json({
             success: false,
-            message: "This account does not exist.",
+            message: "This account is not active. Please contact an administrator.",
+            code: "ACCOUNT_INACTIVE",
           });
         }
         return res.status(401).json({
@@ -221,34 +224,17 @@ export class AuthController {
         }
       }
 
-      const token = jwt.sign({
-        userId: user._id,
-        role: user.role,
-        email: user.email,
-        firstName: user.firstName,
-        lastName: user.lastName,
-      }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
-
-      // Get document verification status
-      const documentVerificationStatus = user.documentVerification?.status || "unverified";
-      const isDocumentVerified = documentVerificationStatus === "verified";
+      const loginPayload = await buildAuthLoginPayload(user);
 
       return res.status(200).json({
         success: true,
         message: "Logged in successfully",
-        token,
-        user: {
-          userId: user._id,
-          email: user.email,
-          firstName: user.firstName,
-          lastName: user.lastName,
-          role: user.role,
-          phone: user.phone,
-          isVerified: user.isVerified,
-          isDocumentVerified: isDocumentVerified,
-          documentVerificationStatus: documentVerificationStatus, // "unverified" | "pending" | "verified" | "rejected"
-          requiresOnboarding: !user.isVerified, // If not verified, they need onboarding
-        }
+        token: loginPayload.token,
+        user: loginPayload.user,
+        permissions: loginPayload.permissions,
+        portal: loginPayload.portal,
+        isSuperAdmin: loginPayload.isSuperAdmin,
+        mustChangePassword: loginPayload.mustChangePassword,
       });
     } catch (error) {
       next(error);
@@ -296,34 +282,20 @@ export class AuthController {
           });
         }
 
-        const token = jwt.sign({
-          userId: user._id,
-          role: user.role,
-          email: user.email,
-          firstName: user.firstName,
-          lastName: user.lastName,
-        }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
-
-        // Get document verification status
-        const documentVerificationStatus = user.documentVerification?.status || "unverified";
-        const isDocumentVerified = documentVerificationStatus === "verified";
+        const loginPayload = await buildAuthLoginPayload(user);
 
         return res.status(200).json({
           success: true,
           message: "2FA verified successfully! Logged in.",
-          token,
+          token: loginPayload.token,
           user: {
-            userId: user._id,
-            email: user.email,
-            firstName: user.firstName,
-            lastName: user.lastName,
-            role: user.role,
-            phone: user.phone,
-            isVerified: user.isVerified,
-            isDocumentVerified: isDocumentVerified,
-            documentVerificationStatus: documentVerificationStatus, // "unverified" | "pending" | "verified" | "rejected"
-            twoFactorEnabled: user.twoFactorEnabled
-          }
+            ...loginPayload.user,
+            twoFactorEnabled: user.twoFactorEnabled,
+          },
+          permissions: loginPayload.permissions,
+          portal: loginPayload.portal,
+          isSuperAdmin: loginPayload.isSuperAdmin,
+          mustChangePassword: loginPayload.mustChangePassword,
         });
       } else {
         return res.status(400).json({
@@ -357,24 +329,36 @@ export class AuthController {
       const documentVerificationStatus = user.documentVerification?.status || "unverified";
       const isDocumentVerified = documentVerificationStatus === "verified";
 
+      const staffAuth = await resolveStaffAuthContext(user);
+
+      const responseData: Record<string, unknown> = {
+        userId: user._id,
+        email: user.email,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        role: user.role,
+        phone: user.phone,
+        isVerified: user.isVerified,
+        isActive: user.isActive,
+        isDocumentVerified,
+        documentVerificationStatus,
+        requiresOnboarding: !user.isVerified,
+        profile: user.profile,
+        preferences: user.preferences,
+        settings: user.settings,
+        isSuperAdmin: staffAuth.isSuperAdmin,
+        mustChangePassword: !!user.mustChangePassword,
+      };
+
+      if (isStaffPortalRole(user.role)) {
+        responseData.staffRole = staffAuth.staffRole;
+        responseData.portal = staffAuth.portal;
+        responseData.permissions = staffAuth.permissions;
+      }
+
       res.status(200).json({
         success: true,
-        data: {
-          userId: user._id,
-          email: user.email,
-          firstName: user.firstName,
-          lastName: user.lastName,
-          role: user.role,
-          phone: user.phone,
-          isVerified: user.isVerified,
-          isActive: user.isActive,
-          isDocumentVerified: isDocumentVerified,
-          documentVerificationStatus: documentVerificationStatus, // "unverified" | "pending" | "verified" | "rejected"
-          requiresOnboarding: !user.isVerified, // If not verified, they need onboarding
-          profile: user.profile,
-          preferences: user.preferences,
-          settings: user.settings,
-        },
+        data: responseData,
       });
     } catch (error) {
       next(error);
@@ -431,6 +415,56 @@ export class AuthController {
       }
 
       return res.status(200).json({ success: true, message: result.message });
+    } catch (error: any) {
+      next(error);
+    }
+  }
+
+  /**
+   * Authenticated password change (staff first-login or voluntary).
+   */
+  async changePassword(req: Request, res: Response, next: NextFunction) {
+    try {
+      const userId = (req as any).user?._id;
+      const { currentPassword, newPassword, confirmPassword } = req.body || {};
+
+      if (!newPassword || typeof newPassword !== "string" || newPassword.length < 8) {
+        return res.status(400).json({
+          success: false,
+          message: "New password must be at least 8 characters.",
+        });
+      }
+
+      if (confirmPassword !== undefined && confirmPassword !== newPassword) {
+        return res.status(400).json({ success: false, message: "Passwords do not match." });
+      }
+
+      const user = await User.findById(userId);
+      if (!user) {
+        return res.status(404).json({ success: false, message: "User not found" });
+      }
+
+      if (!user.mustChangePassword) {
+        if (!currentPassword) {
+          return res.status(400).json({
+            success: false,
+            message: "Current password is required.",
+          });
+        }
+        const matches = await user.comparePassword(currentPassword);
+        if (!matches) {
+          return res.status(400).json({ success: false, message: "Current password is incorrect." });
+        }
+      }
+
+      user.password = newPassword;
+      user.mustChangePassword = false;
+      await user.save();
+
+      return res.status(200).json({
+        success: true,
+        message: "Password updated successfully.",
+      });
     } catch (error: any) {
       next(error);
     }

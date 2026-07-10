@@ -2,6 +2,7 @@
 import { Router } from "express";
 import { paymentController } from "../controllers/PaymentController";
 import { authenticate, authorize } from "../middleware/authenticate";
+import { requirePermission } from "../middleware/permissions";
 
 const router = Router();
 
@@ -77,12 +78,13 @@ router.get("/transactions/status",
 // Admin: Get all payments in the system
 router.get("/admin/all", 
   authorize(["admin"]),
+  requirePermission("khayalami.payments.view"),
   (req, res, next) => paymentController.getAllPayments(req, res, next)
 );
 
-// Admin: Get all payments with commission data (earnings table)
 router.get("/admin/earnings", 
   authorize(["admin"]),
+  requirePermission("khayalami.payments.view"),
   (req, res, next) => paymentController.getAllPaymentsWithCommissions(req, res, next)
 );
 

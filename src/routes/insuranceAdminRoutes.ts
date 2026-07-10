@@ -2,6 +2,7 @@
 import express from "express";
 import { insuranceAdminController } from "../controllers/InsuranceAdminController";
 import { authenticate, authorize } from "../middleware/authenticate";
+import { requirePermission } from "../middleware/permissions";
 
 const router = express.Router();
 
@@ -10,18 +11,20 @@ router.use(authorize(["insurance_admin"]));
 
 router.get(
   "/summary",
-  (req, res, next) => insuranceAdminController.getSummary(req, res, next),
+  requirePermission("insurance.dashboard.view"),
+  (req, res, next) => insuranceAdminController.getSummary(req, res, next)
 );
 
 router.get(
   "/policies",
-  (req, res, next) => insuranceAdminController.listPolicies(req, res, next),
+  requirePermission("insurance.policies.view"),
+  (req, res, next) => insuranceAdminController.listPolicies(req, res, next)
 );
 
 router.get(
   "/policies/property/:propertyId",
-  (req, res, next) =>
-    insuranceAdminController.getPolicyByPropertyId(req, res, next),
+  requirePermission("insurance.policies.view"),
+  (req, res, next) => insuranceAdminController.getPolicyByPropertyId(req, res, next)
 );
 
 export default router;

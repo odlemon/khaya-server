@@ -2,6 +2,7 @@
 import { Router } from "express";
 import { paymentRequestController } from "../controllers/PaymentRequestController";
 import { authenticate, authorize } from "../middleware/authenticate";
+import { requirePermission } from "../middleware/permissions";
 
 const router = Router();
 
@@ -17,22 +18,23 @@ router.get(
   "/pending",
   authenticate,
   authorize(["admin"]),
+  requirePermission("khayalami.payment_requests.view"),
   paymentRequestController.getPendingRequests.bind(paymentRequestController)
 );
 
-// Approve payment request (admin)
 router.post(
   "/:id/approve",
   authenticate,
   authorize(["admin"]),
+  requirePermission("khayalami.payment_requests.approve"),
   paymentRequestController.approvePaymentRequest.bind(paymentRequestController)
 );
 
-// Reject payment request (admin)
 router.post(
   "/:id/reject",
   authenticate,
   authorize(["admin"]),
+  requirePermission("khayalami.payment_requests.reject"),
   paymentRequestController.rejectPaymentRequest.bind(paymentRequestController)
 );
 

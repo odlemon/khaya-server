@@ -3,6 +3,7 @@ import express from "express";
 import { agreementController } from "../controllers/AgreementController";
 import { authenticate } from "../middleware/authenticate";
 import { authorize } from "../middleware/authenticate";
+import { requirePermission } from "../middleware/permissions";
 
 const router = express.Router();
 
@@ -11,7 +12,8 @@ router.use(authenticate);
 
 // Get connected landlords and tenants for agreement creation (admin only)
 router.get("/connected-parties", 
-  authorize(["admin"]), 
+  authorize(["admin"]),
+  requirePermission("khayalami.agreements.view"),
   (req, res, next) => agreementController.getConnectedParties(req, res, next)
 );
 
@@ -45,7 +47,8 @@ router.get("/:id/pdf", (req, res, next) => agreementController.generateAgreement
 
 // Generate agreement Word document from template (admin only)
 router.post("/:id/generate-word", 
-  authorize(["admin"]), 
+  authorize(["admin"]),
+  requirePermission("khayalami.agreements.generate_word"),
   (req, res, next) => agreementController.generateAgreementWordDocument(req, res, next)
 );
 
@@ -63,13 +66,14 @@ router.get("/:id/audit-trail", (req, res, next) => agreementController.getAgreem
 
 // Create new agreement (admin only)
 router.post("/", 
-  authorize(["admin"]), 
+  authorize(["admin"]),
+  requirePermission("khayalami.agreements.create"),
   (req, res, next) => agreementController.createAgreement(req, res, next)
 );
 
-// Create agreement from template (admin only)
 router.post("/from-template", 
-  authorize(["admin"]), 
+  authorize(["admin"]),
+  requirePermission("khayalami.agreements.from_template"),
   (req, res, next) => agreementController.createAgreementFromTemplate(req, res, next)
 );
 
@@ -129,7 +133,8 @@ router.get("/signatures/:signatureId/verify", (req, res, next) => agreementContr
 
 // Admin: Get all agreements in the system
 router.get("/admin/all", 
-  authorize(["admin"]), 
+  authorize(["admin"]),
+  requirePermission("khayalami.agreements.view"),
   (req, res, next) => agreementController.getAllAgreements(req, res, next)
 );
 

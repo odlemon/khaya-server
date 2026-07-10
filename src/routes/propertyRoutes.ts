@@ -4,6 +4,7 @@ import { propertyController } from "../controllers/PropertyController";
 import { premiumBoostController } from "../controllers/PremiumBoostController";
 import { authenticate } from "../middleware/authenticate";
 import { authorize } from "../middleware/authenticate";
+import { requirePermission } from "../middleware/permissions";
 
 const router = express.Router();
 
@@ -36,8 +37,8 @@ router.patch("/:id/status", authenticate, (req, res, next) => propertyController
 router.patch("/:id/images", authenticate, (req, res, next) => propertyController.updatePropertyImages(req, res, next));
 
 // Admin routes (must come before /:id routes to avoid conflicts)
-router.post("/admin/:id/verify", authenticate, authorize(["admin"]), (req, res, next) => propertyController.verifyPropertyListing(req, res, next));
-router.post("/admin/:id/reject", authenticate, authorize(["admin"]), (req, res, next) => propertyController.rejectPropertyListing(req, res, next));
+router.post("/admin/:id/verify", authenticate, authorize(["admin"]), requirePermission("khayalami.properties.verify"), (req, res, next) => propertyController.verifyPropertyListing(req, res, next));
+router.post("/admin/:id/reject", authenticate, authorize(["admin"]), requirePermission("khayalami.properties.reject"), (req, res, next) => propertyController.rejectPropertyListing(req, res, next));
 
 // Boost routes (must come before /:id routes to avoid conflicts)
 router.get("/boosts/history", authenticate, (req, res, next) => propertyController.getAllBoostsHistory(req, res, next));

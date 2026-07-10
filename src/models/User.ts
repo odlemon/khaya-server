@@ -119,6 +119,14 @@ export interface IUser extends Document {
   adminReinstatedAt?: Date | null;
   adminReinstatementReason?: string | null;
   adminReinstatedBy?: mongoose.Types.ObjectId | null;
+  /** Dynamic staff role (portal RBAC) — null for super-admins and app users */
+  staffRoleId?: mongoose.Types.ObjectId | null;
+  /** Bypass all permission checks when true */
+  isSuperAdmin?: boolean;
+  /** Force password change on next login (staff credential email) */
+  mustChangePassword?: boolean;
+  /** Admin who created this staff user */
+  createdByStaff?: mongoose.Types.ObjectId | null;
   comparePassword(candidatePassword: string): Promise<boolean>;
 }
 
@@ -246,6 +254,10 @@ const userSchema = new Schema<IUser>(
     adminReinstatedAt: { type: Date, default: null },
     adminReinstatementReason: { type: String, maxlength: 2000, default: null },
     adminReinstatedBy: { type: Schema.Types.ObjectId, ref: "User", default: null },
+    staffRoleId: { type: Schema.Types.ObjectId, ref: "StaffRole", default: null },
+    isSuperAdmin: { type: Boolean, default: false },
+    mustChangePassword: { type: Boolean, default: false },
+    createdByStaff: { type: Schema.Types.ObjectId, ref: "User", default: null },
   },
   { timestamps: true }
 );

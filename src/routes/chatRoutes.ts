@@ -2,6 +2,7 @@
 import express from "express";
 import { chatController } from "../controllers/ChatController";
 import { authenticate, authorize } from "../middleware/authenticate";
+import { requirePermission } from "../middleware/permissions";
 
 const router = express.Router();
 
@@ -31,10 +32,10 @@ router.get("/move-in-requests", authorize(["landlord"]), chatController.getLandl
 router.get("/pending-requests", authorize(["tenant"]), chatController.getTenantPendingRequests.bind(chatController));
 
 // Admin-specific routes
-router.get("/admin/all-chats", authorize(["admin"]), chatController.getAllChats.bind(chatController));
-router.post("/admin/join/:chatId", authorize(["admin"]), chatController.adminJoinChat.bind(chatController));
-router.post("/admin/cleanup-duplicates", authorize(["admin"]), chatController.cleanupDuplicateParticipants.bind(chatController));
-router.post("/admin/link-to-property", authorize(["admin"]), chatController.linkChatToProperty.bind(chatController));
+router.get("/admin/all-chats", authorize(["admin"]), requirePermission("khayalami.chat.view"), chatController.getAllChats.bind(chatController));
+router.post("/admin/join/:chatId", authorize(["admin"]), requirePermission("khayalami.chat.join"), chatController.adminJoinChat.bind(chatController));
+router.post("/admin/cleanup-duplicates", authorize(["admin"]), requirePermission("khayalami.chat.view"), chatController.cleanupDuplicateParticipants.bind(chatController));
+router.post("/admin/link-to-property", authorize(["admin"]), requirePermission("khayalami.chat.view"), chatController.linkChatToProperty.bind(chatController));
 
 // Chat-specific routes (parameterized — must be last)
 router.get("/:chatId", chatController.getChatById.bind(chatController));

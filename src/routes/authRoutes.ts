@@ -15,6 +15,7 @@ router.post("/register", authController.register.bind(authController));
 router.post("/login", authController.login.bind(authController));
 router.post("/forgot-password", authController.forgotPassword.bind(authController));
 router.post("/reset-password", authController.resetPassword.bind(authController));
+router.post("/change-password", authenticate, authController.changePassword.bind(authController));
 router.post("/verify-2fa", authController.verify2FALogin.bind(authController));
 router.get("/me", authenticate,  authController.me.bind(authController));
 

@@ -5,9 +5,11 @@ import jwt from "jsonwebtoken";
 import { User, IUser } from "../models/User";
 import { JWT_SECRET, JWT_EXPIRES_IN } from "../config/jwtConfig";
 import { logger } from "../utils/logger";
+import { resolveStaffAuthContext, StaffAuthContext } from "../utils/staffAuth";
 
 export interface AuthRequest extends Request {
   user?: IUser;
+  staffAuth?: StaffAuthContext;
 }
 
 export function createToken(userId: string): string {
@@ -79,6 +81,7 @@ export async function authenticate(req: AuthRequest, res: Response, next: NextFu
     }
 
     req.user = user;
+    req.staffAuth = await resolveStaffAuthContext(user);
     next();
   } catch (err: any) {
     logger.error("Auth DB lookup failed (token may still be valid)", {

@@ -1,6 +1,7 @@
 // @ts-nocheck
 import express from "express";
 import { authenticate, authorize } from "../middleware/authenticate";
+import { requirePermission } from "../middleware/permissions";
 import { maintenanceController } from "../controllers/MaintenanceController";
 
 const router = express.Router();
@@ -70,31 +71,35 @@ router.post(
 router.get(
   "/admin/awaiting-vendor",
   authorize(["admin"]),
+  requirePermission("khayalami.maintenance.view"),
   maintenanceController.getAwaitingVendorRequests.bind(maintenanceController)
 );
 
-// Get all maintenance requests for admin
 router.get(
   "/admin/all",
   authorize(["admin"]),
+  requirePermission("khayalami.maintenance.view"),
   maintenanceController.getAllRequests.bind(maintenanceController)
 );
 
 router.post(
   "/admin/requests/:id/assign-vendor",
   authorize(["admin"]),
+  requirePermission("khayalami.maintenance.assign_vendor"),
   maintenanceController.assignVendor.bind(maintenanceController)
 );
 
 router.post(
   "/admin/requests/:id/update-eta",
   authorize(["admin"]),
+  requirePermission("khayalami.maintenance.update_eta"),
   maintenanceController.updateVendorETA.bind(maintenanceController)
 );
 
 router.post(
   "/admin/requests/:id/mark-arrived",
   authorize(["admin"]),
+  requirePermission("khayalami.maintenance.mark_arrived"),
   maintenanceController.markVendorArrived.bind(maintenanceController)
 );
 
