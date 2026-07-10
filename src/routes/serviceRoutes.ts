@@ -2,6 +2,7 @@
 import express from "express";
 import { serviceBookingController } from "../controllers/ServiceBookingController";
 import { authenticate, authorize } from "../middleware/authenticate";
+import { requirePermission } from "../middleware/permissions";
 
 const router = express.Router();
 
@@ -130,39 +131,28 @@ router.post(
 router.get(
   "/admin/all",
   authorize(["admin"]),
+  requirePermission("khayalami.services.view"),
   serviceBookingController.getAllServices.bind(serviceBookingController)
 );
 
-/**
- * Admin: Assign vendor to service
- * PUT /api/admin/services/:serviceId/assign
- * Role: Admin
- */
 router.put(
   "/admin/:serviceId/assign",
   authorize(["admin"]),
+  requirePermission("khayalami.services.assign"),
   serviceBookingController.assignVendor.bind(serviceBookingController)
 );
 
-/**
- * Admin: Update service status
- * PUT /api/admin/services/:serviceId/status
- * Role: Admin
- */
 router.put(
   "/admin/:serviceId/status",
   authorize(["admin"]),
+  requirePermission("khayalami.services.assign"),
   serviceBookingController.updateServiceStatus.bind(serviceBookingController)
 );
 
-/**
- * Admin: Create bill for service
- * POST /api/admin/services/:serviceId/bill
- * Role: Admin
- */
 router.post(
   "/admin/:serviceId/bill",
   authorize(["admin"]),
+  requirePermission("khayalami.services.billing"),
   serviceBookingController.createServiceBill.bind(serviceBookingController)
 );
 
@@ -207,39 +197,28 @@ router.get(
 router.get(
   "/admin/needing-vendor",
   authorize(["admin"]),
+  requirePermission("khayalami.services.view"),
   serviceBookingController.getServicesNeedingVendorAssignment.bind(serviceBookingController)
 );
 
-/**
- * Admin: Assign vendor to service
- * POST /api/services/admin/:serviceId/assign-vendor
- * Role: Admin
- */
 router.post(
   "/admin/:serviceId/assign-vendor",
   authorize(["admin"]),
+  requirePermission("khayalami.services.assign"),
   serviceBookingController.assignVendorToService.bind(serviceBookingController)
 );
 
-/**
- * Admin: Approve service (schedule)
- * POST /api/services/admin/:serviceId/approve
- * Role: Admin
- */
 router.post(
   "/admin/:serviceId/approve",
   authorize(["admin"]),
+  requirePermission("khayalami.services.approve"),
   serviceBookingController.adminApproveService.bind(serviceBookingController)
 );
 
-/**
- * Admin: Reject service
- * POST /api/services/admin/:serviceId/reject
- * Role: Admin
- */
 router.post(
   "/admin/:serviceId/reject",
   authorize(["admin"]),
+  requirePermission("khayalami.services.reject"),
   serviceBookingController.adminRejectService.bind(serviceBookingController)
 );
 

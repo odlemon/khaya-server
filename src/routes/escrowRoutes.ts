@@ -2,6 +2,7 @@
 import { Router } from "express";
 import { escrowController } from "../controllers/EscrowController";
 import { authenticate, authorize } from "../middleware/authenticate";
+import { requirePermission } from "../middleware/permissions";
 
 const router = Router();
 
@@ -11,6 +12,7 @@ router.use(authenticate);
 // Get escrow summary (Admin only)
 router.get("/summary",
   authorize(["admin"]),
+  requirePermission("khayalami.escrow.view"),
   (req, res, next) => escrowController.getEscrowSummary(req, res, next)
 );
 
@@ -23,18 +25,21 @@ router.get("/landlord/transactions",
 // Manual distribution (Admin only)
 router.post("/distribute",
   authorize(["admin"]),
+  requirePermission("khayalami.escrow.distribute"),
   (req, res, next) => escrowController.distributeEscrow(req, res, next)
 );
 
 // Get distribution statistics (Admin only)
 router.get("/stats",
   authorize(["admin"]),
+  requirePermission("khayalami.escrow.view"),
   (req, res, next) => escrowController.getDistributionStats(req, res, next)
 );
 
 // Get all escrow transactions (Admin only)
 router.get("/transactions",
   authorize(["admin"]),
+  requirePermission("khayalami.escrow.view"),
   (req, res, next) => escrowController.getAllEscrowTransactions(req, res, next)
 );
 

@@ -2,6 +2,7 @@
 import express from "express";
 import { CommissionController } from "../controllers/CommissionController";
 import { authenticate, authorize } from "../middleware/authenticate";
+import { requirePermission } from "../middleware/permissions";
 
 const router = express.Router();
 const commissionController = new CommissionController();
@@ -40,18 +41,21 @@ router.post("/landlord/:landlordId/collect-debt",
 router.get("/admin/earnings",
   authenticate,
   authorize(["admin"]),
+  requirePermission("khayalami.commissions.view"),
   (req, res, next) => commissionController.getKhayalamiEarnings(req, res, next)
 );
 
 router.get("/admin/summary",
   authenticate,
   authorize(["admin"]),
+  requirePermission("khayalami.commissions.view"),
   (req, res, next) => commissionController.getCommissionSummary(req, res, next)
 );
 
 router.get("/admin/all",
   authenticate,
   authorize(["admin"]),
+  requirePermission("khayalami.commissions.view"),
   (req, res, next) => commissionController.getAllCommissions(req, res, next)
 );
 

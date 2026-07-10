@@ -1,5 +1,6 @@
 /**
  * Seed insurance and bank portal admin users (same login as Khayalami admin).
+ * Existing portal staff accounts are marked isSuperAdmin: true for RBAC bypass.
  *
  * npx ts-node src/scripts/seedPortalAdmins.ts
  */
@@ -29,6 +30,8 @@ const PORTAL_ADMINS = [
   },
 ];
 
+const STAFF_ROLES = ["admin", "bank_admin", "insurance_admin"] as const;
+
 async function seedPortalAdmins() {
   const mongoUri = process.env.MONGODB_URI;
   if (!mongoUri) {
@@ -44,7 +47,13 @@ async function seedPortalAdmins() {
       const email = cred.email.trim().toLowerCase();
       const existing = await User.findOne({ email });
       if (existing) {
-        console.log(`⚠️  Already exists (skipped): ${email} (role: ${existing.role})`);
+        if (!existing.isSuperAdmin) {
+          existing.isSuperAdmin = true;
+          await existing.save();
+          console.log(`✅ Marked super-admin: ${email}`);
+        } else {
+          console.log(`⚠️  Already exists (skipped): ${email} (role: ${existing.role})`);
+        }
         continue;
       }
 
@@ -56,9 +65,22 @@ async function seedPortalAdmins() {
         role: cred.role,
         isVerified: true,
         isActive: true,
+        isSuperAdmin: true,
       });
 
       console.log(`✅ Created ${cred.role}: ${email}`);
+    }
+
+    const legacySuperAdmins = await User.updateMany(
+      {
+        role: { $in: STAFF_ROLES },
+        $or: [{ staffRoleId: null }, { staffRoleId: { $exists: false } }],
+        isSuperAdmin: { $ne: true },
+      },
+      { $set: { isSuperAdmin: true } }
+    );
+    if (legacySuperAdmins.modifiedCount > 0) {
+      console.log(`\n✅ Marked ${legacySuperAdmins.modifiedCount} legacy portal admin(s) as super-admin`);
     }
 
     console.log("\n📧 Portal admin login (POST /api/auth/login):");

@@ -2,6 +2,7 @@
 import express from "express";
 import { documentVerificationController } from "../controllers/DocumentVerificationController";
 import { authenticate, authorize } from "../middleware/authenticate";
+import { requirePermission } from "../middleware/permissions";
 
 const router = express.Router();
 
@@ -15,9 +16,9 @@ router.get("/required", authorize(["tenant", "landlord"]), documentVerificationC
 router.get("/check", authorize(["tenant", "landlord"]), documentVerificationController.checkRequiredDocuments.bind(documentVerificationController));
 
 // Admin document verification routes
-router.get("/admin/pending", authorize(["admin"]), documentVerificationController.getPendingVerifications.bind(documentVerificationController));
-router.get("/admin/all", authorize(["admin"]), documentVerificationController.getAllVerifications.bind(documentVerificationController));
-router.post("/admin/verify", authorize(["admin"]), documentVerificationController.verifyDocuments.bind(documentVerificationController));
-router.post("/admin/reject", authorize(["admin"]), documentVerificationController.rejectDocuments.bind(documentVerificationController));
+router.get("/admin/pending", authorize(["admin"]), requirePermission("khayalami.documents.view"), documentVerificationController.getPendingVerifications.bind(documentVerificationController));
+router.get("/admin/all", authorize(["admin"]), requirePermission("khayalami.documents.view"), documentVerificationController.getAllVerifications.bind(documentVerificationController));
+router.post("/admin/verify", authorize(["admin"]), requirePermission("khayalami.documents.verify"), documentVerificationController.verifyDocuments.bind(documentVerificationController));
+router.post("/admin/reject", authorize(["admin"]), requirePermission("khayalami.documents.reject"), documentVerificationController.rejectDocuments.bind(documentVerificationController));
 
 export default router;

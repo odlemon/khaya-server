@@ -2,6 +2,7 @@
 import express from "express";
 import { UserProfileController } from "../controllers/UserProfileController";
 import { authenticate, authorize } from "../middleware/authenticate";
+import { requirePermission } from "../middleware/permissions";
 
 const router = express.Router();
 const userProfileController = new UserProfileController();
@@ -16,6 +17,7 @@ router.get("/profile",
 router.get("/:userId/profile",
   authenticate,
   authorize(["admin"]),
+  requirePermission("khayalami.users.view"),
   (req, res, next) => userProfileController.getUserProfile(req, res, next)
 );
 
@@ -29,6 +31,7 @@ router.put("/profile",
 router.put("/:userId/profile",
   authenticate,
   authorize(["admin"]),
+  requirePermission("khayalami.users.update_status"),
   (req, res, next) => userProfileController.updateUserProfile(req, res, next)
 );
 
@@ -42,6 +45,7 @@ router.put("/password",
 router.put("/:userId/password",
   authenticate,
   authorize(["admin"]),
+  requirePermission("khayalami.users.update_status"),
   (req, res, next) => userProfileController.updatePassword(req, res, next)
 );
 
@@ -55,6 +59,7 @@ router.put("/profile-picture",
 router.put("/:userId/profile-picture",
   authenticate,
   authorize(["admin"]),
+  requirePermission("khayalami.users.update_status"),
   (req, res, next) => userProfileController.updateProfilePicture(req, res, next)
 );
 
@@ -68,6 +73,7 @@ router.get("/settings",
 router.get("/:userId/settings",
   authenticate,
   authorize(["admin"]),
+  requirePermission("khayalami.users.view"),
   (req, res, next) => userProfileController.getUserSettings(req, res, next)
 );
 
@@ -81,6 +87,7 @@ router.put("/settings",
 router.put("/:userId/settings",
   authenticate,
   authorize(["admin"]),
+  requirePermission("khayalami.users.update_status"),
   (req, res, next) => userProfileController.updateUserSettings(req, res, next)
 );
 
@@ -94,6 +101,7 @@ router.put("/preferences",
 router.put("/:userId/preferences",
   authenticate,
   authorize(["admin"]),
+  requirePermission("khayalami.users.update_status"),
   (req, res, next) => userProfileController.updateUserPreferences(req, res, next)
 );
 

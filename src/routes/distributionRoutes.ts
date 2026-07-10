@@ -2,6 +2,7 @@
 import { Router } from "express";
 import { distributionController } from "../controllers/DistributionController";
 import { authenticate, authorize } from "../middleware/authenticate";
+import { requirePermission } from "../middleware/permissions";
 
 const router = Router();
 
@@ -10,13 +11,11 @@ router.use(authenticate);
 router.use(authorize(["admin"]));
 
 // Manual distribution (admin triggered)
-router.post("/manual", distributionController.manualDistribution.bind(distributionController));
+router.post("/manual", requirePermission("khayalami.distribution.manual"), distributionController.manualDistribution.bind(distributionController));
 
-// Get distribution summary
-router.get("/summary", distributionController.getDistributionSummary.bind(distributionController));
+router.get("/summary", requirePermission("khayalami.distribution.view"), distributionController.getDistributionSummary.bind(distributionController));
 
-// Get pending transactions ready for distribution
-router.get("/pending", distributionController.getPendingDistribution.bind(distributionController));
+router.get("/pending", requirePermission("khayalami.distribution.view"), distributionController.getPendingDistribution.bind(distributionController));
 
 export default router;
 
