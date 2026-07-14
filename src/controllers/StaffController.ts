@@ -104,12 +104,14 @@ export class StaffController {
         success: true,
         message: result.emailSent
           ? "Staff user created. Login credentials sent by email."
-          : "Staff user created. Email delivery failed — download credentials from the response.",
+          : "Staff user created. Email delivery failed — credentials included in response as a fallback.",
         data: {
           user: result.user,
           emailSent: result.emailSent,
-          // Temporary: include plaintext credentials so portal can download a .txt file while email is down
-          credentials: result.credentials,
+          // When email delivery succeeds, credentials are sent by email and are
+          // intentionally NOT returned in the API response. They are only
+          // included here as a recovery fallback if email delivery failed.
+          ...(result.emailSent ? {} : { credentials: result.credentials }),
         },
       });
     } catch (error: any) {
@@ -147,11 +149,13 @@ export class StaffController {
         success: true,
         message: result.emailSent
           ? "Temporary password generated and emailed to staff user"
-          : "Temporary password generated. Email delivery failed — download credentials from the response.",
+          : "Temporary password generated. Email delivery failed — credentials included in response as a fallback.",
         data: {
           emailSent: result.emailSent,
-          // Temporary: include plaintext credentials so portal can download a .txt file while email is down
-          credentials: result.credentials,
+          // When email delivery succeeds, credentials are sent by email and are
+          // intentionally NOT returned in the API response. They are only
+          // included here as a recovery fallback if email delivery failed.
+          ...(result.emailSent ? {} : { credentials: result.credentials }),
         },
       });
     } catch (error) {
