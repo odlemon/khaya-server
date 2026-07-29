@@ -6,13 +6,12 @@ import { Types } from "mongoose";
 import { Connection } from "../models/Connection";
 import { parseMessageMentions } from "../utils/messageParser";
 import { chatNotificationService } from "./ChatNotificationService";
-import { getActiveAdminUserIds } from "../utils/adminRecipients";
 import { resolveTaggedRecipientUserIds } from "../utils/taggedMessageRecipients";
 import {
   isMessageReadByUser,
   unreadMessagesFilterForUser,
 } from "../utils/messageReadStatus";
-import { purgeInactiveChats, purgeOrphanMessages } from "./ChatRetentionService";
+import { purgeInactiveChats, purgeOrphanMessages, purgeOrphanChatNotifications } from "./ChatRetentionService";
 
 export interface CreateMessageData {
   chatId: string;
@@ -113,7 +112,7 @@ export class ChatService {
       isActive: true
     })
     .populate("participants", "firstName lastName email role profile.avatar")
-    .populate("propertyId", "title address price images propertyType status bedrooms bathrooms landlordId");
+    .populate("propertyId", "title address price serviceFeePayer images propertyType status bedrooms bathrooms landlordId");
 
     if (!chat) {
       // Create new chat
@@ -125,7 +124,7 @@ export class ChatService {
       });
       await chat.save();
       await chat.populate("participants", "firstName lastName email role profile.avatar");
-      await chat.populate("propertyId", "title address price images propertyType status bedrooms bathrooms landlordId");
+      await chat.populate("propertyId", "title address price serviceFeePayer images propertyType status bedrooms bathrooms landlordId");
       
       console.log('✅ Chat created successfully:', {
         chatId: chat._id,
@@ -148,13 +147,16 @@ export class ChatService {
     purgeOrphanMessages().catch((err) => {
       console.error("Background orphan message purge failed:", err.message || err);
     });
+    purgeOrphanChatNotifications().catch((err) => {
+      console.error("Background orphan chat notification purge failed:", err.message || err);
+    });
 
     const chats = await Chat.find({
       participants: userId,
       isActive: true
     })
     .populate("participants", "firstName lastName email role profile.avatar")
-    .populate("propertyId", "title address price images propertyType status bedrooms bathrooms landlordId")
+    .populate("propertyId", "title address price serviceFeePayer images propertyType status bedrooms bathrooms landlordId")
     .populate("lastMessage.senderId", "firstName lastName profile.avatar")
     .sort({ "lastMessage.timestamp": -1, updatedAt: -1 });
 
@@ -179,7 +181,7 @@ export class ChatService {
   async getChatById(chatId: string, userId: string): Promise<{ chat: IChat; messages: IMessage[] }> {
     const chat = await Chat.findById(chatId)
       .populate("participants", "firstName lastName email role profile.avatar")
-      .populate("propertyId", "title address price images propertyType status bedrooms bathrooms landlordId");
+      .populate("propertyId", "title address price serviceFeePayer images propertyType status bedrooms bathrooms landlordId");
 
     if (!chat) {
       throw new Error("Chat not found");
@@ -193,7 +195,7 @@ export class ChatService {
     // Ensure property data is populated (in case it wasn't populated properly)
     if (chat.propertyId && !chat.propertyId._id && typeof chat.propertyId === 'object') {
       // PropertyId exists but might not be populated, re-populate it
-      await chat.populate("propertyId", "title address price images propertyType status bedrooms bathrooms landlordId");
+      await chat.populate("propertyId", "title address price serviceFeePayer images propertyType status bedrooms bathrooms landlordId");
     }
 
     const messages = await Message.find({ chatId })
@@ -288,16 +290,12 @@ export class ChatService {
         recipientIds.add(recipientId);
       }
     } else {
-      // Public — notify other participants + all admins (oversight)
+      // Public — notify other participants only (exclude admins unless @admin tagged).
       for (const p of chat.participants) {
         const pId = p._id?.toString?.() || p.toString();
-        if (pId !== senderIdStr) {
-          recipientIds.add(pId);
-        }
-      }
-      const adminIds = await getActiveAdminUserIds(senderIdStr);
-      for (const adminId of adminIds) {
-        recipientIds.add(adminId);
+        if (pId === senderIdStr) continue;
+        if (p.role === "admin") continue;
+        recipientIds.add(pId);
       }
     }
 
@@ -570,7 +568,7 @@ export class ChatService {
     .populate("chatId")
     .populate({
       path: "chatId",
-      populate: { path: "propertyId", select: "title address price images propertyType status bedrooms bathrooms landlordId" }
+      populate: { path: "propertyId", select: "title address price serviceFeePayer images propertyType status bedrooms bathrooms landlordId" }
     })
     .sort({ createdAt: -1 });
 
@@ -593,7 +591,7 @@ export class ChatService {
     .populate("chatId")
     .populate({
       path: "chatId",
-      populate: { path: "propertyId", select: "title address price images propertyType status bedrooms bathrooms landlordId" }
+      populate: { path: "propertyId", select: "title address price serviceFeePayer images propertyType status bedrooms bathrooms landlordId" }
     })
     .sort({ createdAt: -1 });
 
@@ -619,7 +617,7 @@ export class ChatService {
     .populate("chatId")
     .populate({
       path: "chatId",
-      populate: { path: "propertyId", select: "title address price images propertyType status bedrooms bathrooms landlordId" }
+      populate: { path: "propertyId", select: "title address price serviceFeePayer images propertyType status bedrooms bathrooms landlordId" }
     })
     .sort({ createdAt: -1 });
 
@@ -632,7 +630,7 @@ export class ChatService {
     .populate("chatId")
     .populate({
       path: "chatId",
-      populate: { path: "propertyId", select: "title address price images propertyType status bedrooms bathrooms landlordId" }
+      populate: { path: "propertyId", select: "title address price serviceFeePayer images propertyType status bedrooms bathrooms landlordId" }
     })
     .sort({ createdAt: -1 });
 
@@ -731,7 +729,7 @@ export class ChatService {
       // Already in chat, just return it
       return await Chat.findById(chatId)
         .populate("participants", "firstName lastName email role")
-        .populate("propertyId", "title address price images propertyType status bedrooms bathrooms landlordId");
+        .populate("propertyId", "title address price serviceFeePayer images propertyType status bedrooms bathrooms landlordId");
     }
 
     // Add admin to participants (only if not already present)
@@ -752,7 +750,7 @@ export class ChatService {
 
     return await Chat.findById(chatId)
       .populate("participants", "firstName lastName email role")
-      .populate("propertyId", "title address price images propertyType status bedrooms bathrooms landlordId");
+      .populate("propertyId", "title address price serviceFeePayer images propertyType status bedrooms bathrooms landlordId");
   }
 
   /**
@@ -787,7 +785,7 @@ export class ChatService {
 
     const chats = await Chat.find({ isActive: true })
       .populate("participants", "firstName lastName email role")
-      .populate("propertyId", "title address images propertyType status bedrooms bathrooms price landlordId")
+      .populate("propertyId", "title address images propertyType status bedrooms bathrooms price serviceFeePayer landlordId")
       .sort({ updatedAt: -1 })
       .skip(skip)
       .limit(limit);
@@ -901,7 +899,7 @@ export class ChatService {
 
     chat.propertyId = propertyId as any;
     await chat.save();
-    await chat.populate("propertyId", "title address price images propertyType status bedrooms bathrooms landlordId");
+    await chat.populate("propertyId", "title address price serviceFeePayer images propertyType status bedrooms bathrooms landlordId");
     await chat.populate("participants", "firstName lastName email role profile.avatar");
 
     console.log(`✅ Chat ${chatId} linked to property ${propertyId}`);

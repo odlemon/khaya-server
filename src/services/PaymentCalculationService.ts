@@ -4,6 +4,7 @@ import { Types } from "mongoose";
 import { Rental } from "../models/Rental";
 import { Property } from "../models/Property";
 import { insuranceService } from "./InsuranceService";
+import { PLATFORM_SERVICE_FEE, ServiceFeePayer } from "../utils/serviceFee";
 
 export interface DeductionBreakdown {
   totalAmount: number;
@@ -12,6 +13,7 @@ export interface DeductionBreakdown {
   insurancePremium: number;
   netRentAmount: number;
   khayalamiTotal: number;
+  serviceFeePayer: ServiceFeePayer;
   breakdown: {
     rentAmount: number;
     subscriptionFee: number;
@@ -21,16 +23,40 @@ export interface DeductionBreakdown {
     deductionsTotal: number;
     landlordNet: number;
     khayalamiTotal: number;
+    serviceFeePayer: ServiceFeePayer;
   };
 }
 
 export class PaymentCalculationService {
-  private readonly PROCESSING_FEE_RATE_LOW = 0.015; // 1.5%
-  private readonly PROCESSING_FEE_RATE_HIGH = 0.02; // 2%
   private readonly INSURANCE_COMMISSION_RATE = 0.15; // 15% of premium
 
   /**
-   * Calculate all deductions for a rent payment
+   * Fixed platform service fee (was previously 1.5–2% of rent).
+   * Always USD 10 regardless of rent amount.
+   */
+  calculateProcessingFee(_rentAmount?: number): number {
+    return PLATFORM_SERVICE_FEE;
+  }
+
+  /**
+   * Resolve the service fee payer for a rental.
+   * Falls back to "landlord" if the rental predates the field.
+   */
+  async resolveServiceFeePayer(rentalId: string): Promise<ServiceFeePayer> {
+    try {
+      const rental = await Rental.findById(rentalId).select("serviceFeePayer").lean();
+      return (rental?.serviceFeePayer as ServiceFeePayer) || "landlord";
+    } catch {
+      return "landlord";
+    }
+  }
+
+  /**
+   * Calculate all deductions for a rent payment.
+   *
+   * When the landlord bears the fee the USD 10 is deducted from their payout.
+   * When the tenant bears it the USD 10 was already added to the scheduled
+   * payment amount, so it is still deducted here (it goes to Khayalami either way).
    */
   async calculateRentDeductions(
     rentAmount: number,
@@ -38,20 +64,15 @@ export class PaymentCalculationService {
     landlordId: string,
     rentalId: string
   ): Promise<DeductionBreakdown> {
-    // Calculate subscription fee
     const subscriptionFee = await this.calculateSubscriptionFee(tenantId, rentalId);
-    
-    // Calculate processing fee (1.5-2% of rent)
-    const processingFee = this.calculateProcessingFee(rentAmount);
-    
-    // Calculate insurance premium (if applicable)
+    const processingFee = this.calculateProcessingFee();
     const insurancePremium = await this.calculateInsurancePremium(landlordId, rentalId);
-    
-    // Calculate totals
+    const feePayer = await this.resolveServiceFeePayer(rentalId);
+
     const totalDeductions = subscriptionFee + processingFee + insurancePremium;
-    const netRentAmount = rentAmount - totalDeductions;
+    const netRentAmount = Math.max(0, rentAmount - totalDeductions);
     const khayalamiTotal = totalDeductions;
-    
+
     return {
       totalAmount: rentAmount,
       subscriptionFee,
@@ -59,15 +80,17 @@ export class PaymentCalculationService {
       insurancePremium,
       netRentAmount,
       khayalamiTotal,
+      serviceFeePayer: feePayer,
       breakdown: {
         rentAmount,
         subscriptionFee,
         processingFee,
-        processingFeeRate: this.PROCESSING_FEE_RATE_HIGH, // Using 2% for now
+        processingFeeRate: 0,
         insurancePremium,
         deductionsTotal: totalDeductions,
         landlordNet: netRentAmount,
-        khayalamiTotal
+        khayalamiTotal,
+        serviceFeePayer: feePayer,
       }
     };
   }
@@ -77,7 +100,6 @@ export class PaymentCalculationService {
    */
   async calculateSubscriptionFee(tenantId: string, rentalId?: string): Promise<number> {
     try {
-      // First check for account-level subscription (no rentalId)
       let subscription = await Subscription.findOne({
         tenantId: new Types.ObjectId(tenantId),
         rentalId: null,
@@ -85,7 +107,6 @@ export class PaymentCalculationService {
         endDate: { $gte: new Date() }
       });
 
-      // If no account-level subscription and rentalId provided, check for rental-specific
       if (!subscription && rentalId) {
         subscription = await Subscription.findOne({
           tenantId: new Types.ObjectId(tenantId),
@@ -94,11 +115,11 @@ export class PaymentCalculationService {
           endDate: { $gte: new Date() }
         });
       }
-      
+
       if (!subscription) {
-        return 0; // No active subscription, no fee
+        return 0;
       }
-      
+
       return subscription.price;
     } catch (error) {
       console.error("Error calculating subscription fee:", error);
@@ -107,16 +128,7 @@ export class PaymentCalculationService {
   }
 
   /**
-   * Calculate processing fee (1.5-2% of rent amount)
-   */
-  calculateProcessingFee(rentAmount: number, useHighRate: boolean = true): number {
-    const rate = useHighRate ? this.PROCESSING_FEE_RATE_HIGH : this.PROCESSING_FEE_RATE_LOW;
-    return Math.round(rentAmount * rate * 100) / 100; // Round to 2 decimals
-  }
-
-  /**
    * Calculate insurance premium for a rental's property.
-   * Returns the monthly premium stored on the property (0 if insurance not enabled).
    */
   async calculateInsurancePremium(landlordId: string, rentalId: string): Promise<number> {
     return insuranceService.getRentalInsurancePremium(rentalId);
@@ -126,19 +138,14 @@ export class PaymentCalculationService {
    * Calculate agreement processing fee (one-time, USD 30-50)
    */
   calculateAgreementFee(propertyValue?: number): number {
-    // Base fee
     let fee = 30;
-    
-    // If property value is high, charge more
     if (propertyValue && propertyValue > 100000) {
       fee = 50;
     } else if (propertyValue && propertyValue > 50000) {
       fee = 40;
     }
-    
     return fee;
   }
 }
 
 export const paymentCalculationService = new PaymentCalculationService();
-

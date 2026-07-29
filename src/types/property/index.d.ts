@@ -26,6 +26,7 @@ export interface Property {
   zeroDepositAvailable: boolean;
   utilitiesIncluded: boolean;
   utilitiesCost?: number;
+  serviceFeePayer: "landlord" | "tenant";
   
   // Property Details
   bedrooms: number;
@@ -154,6 +155,7 @@ export interface CreatePropertyRequest {
   zeroDepositAvailable?: boolean;
   utilitiesIncluded?: boolean;
   utilitiesCost?: number;
+  serviceFeePayer?: "landlord" | "tenant";
   bedrooms: number;
   bathrooms: number;
   area: number;

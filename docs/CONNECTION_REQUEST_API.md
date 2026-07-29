@@ -13,6 +13,7 @@
 | `propertyId` | `string` | Yes | The ID of the property the tenant is interested in |
 | `landlordId` | `string` | Yes | The ID of the landlord who owns the property |
 | `message` | `string` | Yes | Personal message to the landlord (max 500 characters) |
+| `proposedViewingDate` | `string (YYYY-MM-DD)` | No | Tenant's proposed viewing date. Today or a future date; past dates are rejected |
 | `expectedMoveInDate` | `string (ISO date)` | No | When the tenant expects to move in (e.g. `"2026-04-01"`) |
 | `expectedBudget` | `number` | No | Tenant's monthly budget in Rands (e.g. `5000`) |
 | `numberOfOccupants` | `number` | No | Total number of people who will be living in the property (minimum 1) |
@@ -29,6 +30,7 @@
   "propertyId": "696f703ab5f77d709e34b77e",
   "landlordId": "694a1b2c3d4e5f6a7b8c9d0e",
   "message": "Hi, I'm interested in renting this property. I'm a working professional looking for a quiet place.",
+  "proposedViewingDate": "2026-08-03",
   "expectedMoveInDate": "2026-04-01",
   "expectedBudget": 6500,
   "numberOfOccupants": 2,

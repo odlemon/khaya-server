@@ -1,6 +1,7 @@
 // @ts-nocheck
 import { Request, Response, NextFunction } from "express";
 import { favoriteService } from "../services/FavoriteService";
+import { applyServiceFeeFields } from "../utils/serviceFee";
 
 export class FavoriteController {
 
@@ -78,9 +79,17 @@ export class FavoriteController {
         sortOrder: sortOrder as "asc" | "desc"
       });
 
+      const enriched = result.favorites.map((fav: any) => {
+        const obj = fav.toObject ? fav.toObject() : { ...fav };
+        if (obj.propertyId && typeof obj.propertyId === "object") {
+          applyServiceFeeFields(obj.propertyId);
+        }
+        return obj;
+      });
+
       res.status(200).json({
         success: true,
-        data: result.favorites,
+        data: enriched,
         pagination: {
           page: result.page,
           limit: Number(limit),

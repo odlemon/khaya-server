@@ -126,7 +126,7 @@ class PaymentCompletionService {
         recipientId: "khayalami",
         paymentId: payment._id.toString(),
         rentalId,
-        description: "Payment processing fee",
+        description: `Service fee ($${deductions.processingFee}, ${deductions.serviceFeePayer}-paid)`,
       });
       revenueSourceIds.push(rev._id.toString());
     }

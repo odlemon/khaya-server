@@ -49,7 +49,7 @@ export class RentalService {
         signedAt: tenantSig.signedAt,
         signatureUrl: tenantSig.signatureUrl || undefined,
         ipAddress: tenantSig.ipAddress,
-        paymentStatus: agreement.tenantSignature?.paymentStatus || "deferred",
+        paymentStatus: agreement.tenantSignature?.paymentStatus || "no_payment",
       };
     }
 
@@ -97,7 +97,9 @@ export class RentalService {
       endDate: agreement.endDate,
       monthlyRent: agreement.rentAmount,
       depositAmount: agreement.depositAmount || 0,
-      nextPaymentDue: agreement.startDate, // First payment due on move-in
+      serviceFeePayer: agreement.serviceFeePayer || "landlord",
+      serviceFeeAmount: agreement.serviceFeeAmount ?? 10,
+      nextPaymentDue: agreement.startDate,
       moveInConfirmed: false
     });
 
@@ -171,7 +173,11 @@ export class RentalService {
       }
     }
 
-    const basePaymentAmount = Math.round((rental.monthlyRent + insuranceSurcharge) * 100) / 100;
+    const tenantServiceFee =
+      rental.serviceFeePayer === "tenant" ? (rental.serviceFeeAmount ?? 10) : 0;
+    const basePaymentAmount = Math.round(
+      (rental.monthlyRent + insuranceSurcharge + tenantServiceFee) * 100
+    ) / 100;
 
     let agreementFeePortion = 0;
     if (rental.agreementId) {
@@ -186,10 +192,16 @@ export class RentalService {
     const firstPaymentTotal =
       Math.round((basePaymentAmount + agreementFeePortion) * 100) / 100;
 
-    console.log(`   - Monthly Rent: K${rental.monthlyRent}`);
+    console.log(`   - Monthly Rent: $${rental.monthlyRent}`);
+    console.log(`   - Service Fee Payer: ${rental.serviceFeePayer || "landlord"}`);
+    if (tenantServiceFee > 0) {
+      console.log(`   - Service Fee (tenant-paid): $${tenantServiceFee}`);
+    }
     if (insuranceSurcharge > 0) {
-      console.log(`   - Insurance Surcharge: K${insuranceSurcharge} (added_to_rent)`);
-      console.log(`   - Total Monthly Payment: K${basePaymentAmount}`);
+      console.log(`   - Insurance Surcharge: $${insuranceSurcharge} (added_to_rent)`);
+    }
+    if (tenantServiceFee > 0 || insuranceSurcharge > 0) {
+      console.log(`   - Total Monthly Payment: $${basePaymentAmount}`);
     }
     if (agreementFeePortion > 0) {
       console.log(`   - First Payment Total: K${firstPaymentTotal} (includes agreement fee)`);
@@ -204,13 +216,17 @@ export class RentalService {
       const feeForThisPayment = isFirstPayment ? agreementFeePortion : 0;
       const paymentAmount = isFirstPayment ? firstPaymentTotal : basePaymentAmount;
 
-      const metadata: Record<string, number> = {};
-      if (isFirstPayment && (insuranceSurcharge > 0 || feeForThisPayment > 0)) {
+      const metadata: Record<string, any> = {};
+      if (tenantServiceFee > 0 || insuranceSurcharge > 0 || feeForThisPayment > 0) {
         metadata.rentPortion = rental.monthlyRent;
+        if (tenantServiceFee > 0) {
+          metadata.serviceFee = tenantServiceFee;
+          metadata.serviceFeePayer = "tenant";
+        }
         if (insuranceSurcharge > 0) {
           metadata.insurancePortion = insuranceSurcharge;
         }
-        if (feeForThisPayment > 0) {
+        if (isFirstPayment && feeForThisPayment > 0) {
           metadata.agreementFeePortion = feeForThisPayment;
         }
       }

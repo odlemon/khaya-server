@@ -7,6 +7,8 @@ export interface IConnection extends Document {
   propertyId: mongoose.Types.ObjectId;
   status: "pending" | "accepted" | "rejected" | "cancelled";
   message: string;
+  /** Tenant-proposed property viewing date (stored as UTC midnight). */
+  proposedViewingDate?: Date;
   expectedMoveInDate?: Date;
   /**
    * Preferred monthly budget range (tenant-provided).
@@ -57,6 +59,9 @@ const connectionSchema = new Schema<IConnection>({
     type: String, 
     required: true, 
     maxlength: 500 
+  },
+  proposedViewingDate: {
+    type: Date
   },
   expectedMoveInDate: {
     type: Date

@@ -331,6 +331,7 @@ Content-Type: application/json
   "propertyId": "...",
   "landlordId": "...",
   "message": "I am interested in this property...",
+  "proposedViewingDate": "2026-08-03",
   "expectedMoveInDate": "2026-07-01",
   "expectedBudgetMin": 400,
   "expectedBudgetMax": 600

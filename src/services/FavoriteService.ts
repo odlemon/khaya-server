@@ -116,7 +116,7 @@ export class FavoriteService {
       Favorite.find(query)
         .populate({
           path: "propertyId",
-          select: "title description address price images status landlordId",
+          select: "title description address price serviceFeePayer images status landlordId",
           populate: {
             path: "landlordId",
             select: "firstName lastName email phone"

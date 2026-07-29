@@ -2,6 +2,12 @@
 import { Types } from "mongoose";
 import { Notification, INotification, NotificationType, INotificationData } from "../models/Notification";
 import { User } from "../models/User";
+import {
+  NotificationGroup,
+  groupFilterClause,
+  isValidNotificationGroup,
+  resolveNotificationGroup,
+} from "../utils/notificationGroup";
 
 export interface CreateNotificationInput {
   userId: string;
@@ -9,6 +15,7 @@ export interface CreateNotificationInput {
   title: string;
   body: string;
   data?: INotificationData;
+  group?: NotificationGroup;
 }
 
 export class NotificationService {
@@ -18,9 +25,12 @@ export class NotificationService {
       return null;
     }
 
+    const group = input.group || resolveNotificationGroup(input.type);
+
     const notification = await Notification.create({
       userId: new Types.ObjectId(input.userId),
       type: input.type,
+      group,
       title: input.title,
       body: input.body,
       data: input.data || {},
@@ -32,7 +42,12 @@ export class NotificationService {
 
   async list(
     userId: string,
-    options: { page?: number; limit?: number; unreadOnly?: boolean } = {}
+    options: {
+      page?: number;
+      limit?: number;
+      unreadOnly?: boolean;
+      group?: NotificationGroup;
+    } = {}
   ) {
     const page = Math.max(1, options.page || 1);
     const limit = Math.min(100, Math.max(1, options.limit || 20));
@@ -46,10 +61,19 @@ export class NotificationService {
       filter.read = false;
     }
 
-    const [items, total] = await Promise.all([
+    if (options.group && isValidNotificationGroup(options.group)) {
+      Object.assign(filter, groupFilterClause(options.group));
+    }
+
+    const [rawItems, total] = await Promise.all([
       Notification.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
       Notification.countDocuments(filter),
     ]);
+
+    const items = rawItems.map((item) => ({
+      ...item,
+      group: item.group || resolveNotificationGroup(item.type),
+    }));
 
     return {
       items,
@@ -69,6 +93,25 @@ export class NotificationService {
     });
   }
 
+  async getUnreadCountByGroup(userId: string): Promise<{
+    unreadCount: number;
+    byGroup: { messages: number; actions: number };
+  }> {
+    const userOid = new Types.ObjectId(userId);
+    const base = { userId: userOid, read: false };
+
+    const [messages, actions, unreadCount] = await Promise.all([
+      Notification.countDocuments({ ...base, ...groupFilterClause("messages") }),
+      Notification.countDocuments({ ...base, ...groupFilterClause("actions") }),
+      Notification.countDocuments(base),
+    ]);
+
+    return {
+      unreadCount,
+      byGroup: { messages, actions },
+    };
+  }
+
   async markRead(notificationId: string, userId: string): Promise<INotification | null> {
     return Notification.findOneAndUpdate(
       {
@@ -80,11 +123,22 @@ export class NotificationService {
     );
   }
 
-  async markAllRead(userId: string): Promise<number> {
-    const result = await Notification.updateMany(
-      { userId: new Types.ObjectId(userId), read: false },
-      { $set: { read: true, readAt: new Date() } }
-    );
+  async markAllRead(
+    userId: string,
+    group?: NotificationGroup
+  ): Promise<number> {
+    const filter: Record<string, unknown> = {
+      userId: new Types.ObjectId(userId),
+      read: false,
+    };
+
+    if (group && isValidNotificationGroup(group)) {
+      Object.assign(filter, groupFilterClause(group));
+    }
+
+    const result = await Notification.updateMany(filter, {
+      $set: { read: true, readAt: new Date() },
+    });
     return result.modifiedCount || 0;
   }
 

@@ -2,6 +2,7 @@
 import { User } from "../models/User";
 import { NOT_ADMIN_TERMINATED } from "../constants/userQueries";
 import { Types } from "mongoose";
+import { verificationNotificationService } from "./VerificationNotificationService";
 
 export interface DocumentUploadData {
   userId: string;
@@ -268,23 +269,48 @@ export class DocumentVerificationService {
 
       const updateData: any = {
         "documentVerification.status": data.status,
-        "documentVerification.verifiedAt": new Date(),
-        "documentVerification.verifiedBy": new Types.ObjectId(data.verifiedBy)
       };
+      const unsetData: any = {};
 
       if (data.status === "verified") {
         updateData["documentVerification.adminFeedback"] = data.adminFeedback;
-        updateData["isVerified"] = true; // Set user as verified
+        updateData["documentVerification.verifiedAt"] = new Date();
+        updateData["documentVerification.verifiedBy"] = new Types.ObjectId(data.verifiedBy);
+        unsetData["documentVerification.rejectedAt"] = "";
+        unsetData["documentVerification.rejectedBy"] = "";
+        unsetData["documentVerification.rejectionReason"] = "";
+        updateData["isVerified"] = true;
       } else {
         updateData["documentVerification.rejectedAt"] = new Date();
         updateData["documentVerification.rejectedBy"] = new Types.ObjectId(data.verifiedBy);
         updateData["documentVerification.rejectionReason"] = data.rejectionReason;
         updateData["documentVerification.adminFeedback"] = data.adminFeedback;
+        unsetData["documentVerification.verifiedAt"] = "";
+        unsetData["documentVerification.verifiedBy"] = "";
+        updateData["isVerified"] = false;
       }
 
-      await User.findByIdAndUpdate(data.userId, { $set: updateData });
+      await User.findByIdAndUpdate(data.userId, {
+        $set: updateData,
+        $unset: unsetData,
+      });
 
       console.log(`✅ Documents ${data.status} for user ${data.userId} by admin ${data.verifiedBy}`);
+
+      try {
+        await verificationNotificationService.notifyProfileResult({
+          userId: data.userId,
+          role: user.role,
+          status: data.status,
+          adminFeedback: data.adminFeedback,
+          rejectionReason: data.rejectionReason,
+        });
+      } catch (notifyErr: any) {
+        console.error(
+          "In-app notify (document verification status):",
+          notifyErr?.message || notifyErr
+        );
+      }
 
       return {
         success: true,

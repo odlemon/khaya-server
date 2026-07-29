@@ -197,7 +197,7 @@ class PaymentService {
         recipientId: "khayalami",
         paymentId: newPayment._id.toString(),
         rentalId,
-        description: `Processing fee (${(deductions.breakdown.processingFeeRate * 100).toFixed(1)}%)`
+        description: `Service fee ($${deductions.processingFee}, ${deductions.serviceFeePayer}-paid)`
       });
       revenueSourceIds.push(procRev._id.toString());
     }
@@ -392,7 +392,7 @@ class PaymentService {
         recipientId: "khayalami",
         paymentId: payment._id.toString(),
         rentalId: payment.rentalId.toString(),
-        description: `Processing fee (${(deductions.breakdown.processingFeeRate * 100).toFixed(1)}%)`
+        description: `Service fee ($${deductions.processingFee}, ${deductions.serviceFeePayer}-paid)`
       });
       revenueSourceIds.push(procRev._id.toString());
     }

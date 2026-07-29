@@ -39,7 +39,6 @@ class ChatNotificationService {
     const socketService = getSocketService();
     const isViewingChat = socketService?.isUserInChatRoom(recipientId, chatId) ?? false;
     const fcmActive = fcmService.canSend();
-    const suppressBanner = isViewingChat || fcmActive;
 
     const sender = senderId
       ? await User.findById(senderId).select("firstName lastName role").lean()
@@ -74,6 +73,38 @@ class ChatNotificationService {
       return;
     }
 
+    let fcmSent = 0;
+    if (fcmActive && isFcmEnabled() && !isViewingChat && messageId) {
+      fcmSent = await fcmService.sendChatPushToRecipient({
+        recipientUserId: recipientId,
+        recipientLabel: toName,
+        message: {
+          _id: messageId,
+          chatId,
+          content: previewSource,
+          messageType: messageType || "text",
+          createdAt: saved.createdAt,
+        },
+        sender,
+        landlordId: resolvedLandlordId,
+      });
+      if (fcmSent > 0) {
+        console.log(`[FCM] delivered ${fcmSent} push(es) | messageId=${messageId} to=${toName}`);
+      }
+    } else {
+      let reason = "unknown";
+      if (!fcmActive || !isFcmEnabled()) {
+        reason = fcmService.getSkipReason() || "no_firebase_init";
+      } else if (isViewingChat) {
+        reason = "viewing_chat";
+      } else if (!messageId) {
+        reason = "no_message_id";
+      }
+      logger.info(`[FCM] skip | reason=${reason} to=${toName} chatId=${chatId} type=${type}`);
+    }
+
+    const suppressBanner = isViewingChat || fcmSent > 0;
+
     console.log(
       `[REALTIME] notification saved | id=${saved._id} to=${toName} suppressBanner=${suppressBanner} viewing=${isViewingChat}`
     );
@@ -82,6 +113,7 @@ class ChatNotificationService {
       _id: saved._id,
       userId: saved.userId,
       type: saved.type,
+      group: saved.group,
       title: saved.title,
       body: saved.body,
       read: saved.read,
@@ -98,35 +130,6 @@ class ChatNotificationService {
 
     if (socketService) {
       socketService.emitNotificationCreated(recipientId, { notification: notificationPayload });
-    }
-
-    if (fcmActive && isFcmEnabled() && !isViewingChat && messageId) {
-      const sent = await fcmService.sendChatPushToRecipient({
-        recipientUserId: recipientId,
-        recipientLabel: toName,
-        message: {
-          _id: messageId,
-          chatId,
-          content: previewSource,
-          messageType: messageType || "text",
-          createdAt: saved.createdAt,
-        },
-        sender,
-        landlordId: resolvedLandlordId,
-      });
-      if (sent > 0) {
-        console.log(`[FCM] delivered ${sent} push(es) | messageId=${messageId} to=${toName}`);
-      }
-    } else {
-      let reason = "unknown";
-      if (!fcmActive || !isFcmEnabled()) {
-        reason = fcmService.getSkipReason() || "no_firebase_init";
-      } else if (isViewingChat) {
-        reason = "viewing_chat";
-      } else if (!messageId) {
-        reason = "no_message_id";
-      }
-      logger.info(`[FCM] skip | reason=${reason} to=${toName} chatId=${chatId} type=${type}`);
     }
   }
 }

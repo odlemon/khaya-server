@@ -161,6 +161,8 @@ export class AgreementService {
     const { agreementFeeService } = await import("./AgreementFeeService");
     const agreementFeeAmount = agreementFeeService.calculateFeeForProperty(property as any);
 
+    const { resolveServiceFeePayer, PLATFORM_SERVICE_FEE } = await import("../utils/serviceFee");
+
     // Create the agreement with all extended fields
     const agreement = new Agreement({
       ...data,
@@ -168,6 +170,8 @@ export class AgreementService {
       type: "tenancy",
       agreementFeeAmount,
       agreementFeeStatus: "pending",
+      serviceFeePayer: resolveServiceFeePayer((property as any).serviceFeePayer),
+      serviceFeeAmount: PLATFORM_SERVICE_FEE,
       
       // Extended template fields
       agreementDate: data.agreementDate || new Date(),
@@ -219,23 +223,23 @@ export class AgreementService {
 
     await agreement.save();
 
-    // Send email notifications to both landlord and tenant
+    // Notify landlord to sign first, then inform tenant
     await this.sendAgreementNotification({
       type: "created",
       recipientId: data.landlordId.toString(),
       recipientRole: "landlord",
-      message: `New agreement created for ${property.title}`,
+      message: `Please review and sign the tenancy agreement for ${property.title || property.address}.`,
       agreementId: agreement._id.toString(),
-      propertyId: data.propertyId
+      propertyId: data.propertyId,
     });
 
     await this.sendAgreementNotification({
       type: "created",
       recipientId: data.tenantId.toString(),
       recipientRole: "tenant",
-      message: `New agreement created for ${property.title}`,
+      message: `A tenancy agreement for ${property.title || property.address} has been prepared. You will be notified when it is your turn to sign.`,
       agreementId: agreement._id.toString(),
-      propertyId: data.propertyId
+      propertyId: data.propertyId,
     });
 
     return agreement;
@@ -314,21 +318,25 @@ export class AgreementService {
         signedAt: tenantSig.signedAt,
         signatureUrl: tenantSig.signatureUrl,
         ipAddress: tenantSig.ipAddress,
-        paymentStatus: agreement.tenantSignature?.paymentStatus || "deferred",
+        paymentStatus: agreement.tenantSignature?.paymentStatus || "no_payment",
       };
       changed = true;
     }
     if (changed) await agreement.save();
   }
 
-  /** Explicit flags for agreement list cards (sign status, fee deferral). */
+  /** Explicit flags for agreement list cards (sign status, fee payment). */
   private enrichAgreementForList(agreementObj: any): any {
     agreementObj.landlordSigned = !!agreementObj.landlordSignature?.signedAt;
     agreementObj.tenantSigned = !!agreementObj.tenantSignature?.signedAt;
     agreementObj.bothSigned = agreementObj.landlordSigned && agreementObj.tenantSigned;
-    agreementObj.canSignWithoutPayment = true;
+    const feeCharged = agreementObj.agreementFeeStatus === "charged";
+    const feeAmount = agreementObj.agreementFeeAmount || 0;
+    // Tenant must pay agreement fee before signing (unless fee is 0 / already charged)
+    agreementObj.canSignWithoutPayment = feeAmount <= 0 || feeCharged;
     agreementObj.paymentStatus =
-      agreementObj.tenantSignature?.paymentStatus || "no_payment";
+      agreementObj.tenantSignature?.paymentStatus ||
+      (feeCharged ? "verified" : "no_payment");
     return agreementObj;
   }
 
@@ -356,30 +364,21 @@ export class AgreementService {
       throw new Error("Access denied");
     }
 
-    // Sync legacy upfront-fee payment status when tenant has signed
-    if (agreement.tenantSignature?.signedAt) {
-      const { agreementFeeService } = await import("./AgreementFeeService");
-      const correctPaymentStatus = await agreementFeeService.resolveTenantFeePaymentStatus(
-        agreement,
-        tenantIdStr
-      );
+    // Sync agreement fee payment status for the tenant
+    const { agreementFeeService } = await import("./AgreementFeeService");
+    const correctPaymentStatus = await agreementFeeService.resolveTenantFeePaymentStatus(
+      agreement,
+      tenantIdStr
+    );
 
-      if (
-        agreement.tenantSignature.paymentStatus !== correctPaymentStatus &&
-        correctPaymentStatus !== "deferred"
-      ) {
+    if (agreement.tenantSignature?.signedAt) {
+      if (agreement.tenantSignature.paymentStatus !== correctPaymentStatus) {
         agreement.tenantSignature.paymentStatus = correctPaymentStatus;
         await agreement.save();
-      } else if (
-        correctPaymentStatus === "deferred" &&
-        agreement.tenantSignature.paymentStatus !== "deferred" &&
-        agreement.tenantSignature.paymentStatus !== "verified"
-      ) {
-        agreement.tenantSignature.paymentStatus = "deferred";
-        await agreement.save();
       }
-
       agreement.set("computedTenantPaymentStatus", agreement.tenantSignature.paymentStatus);
+    } else {
+      agreement.set("computedTenantPaymentStatus", correctPaymentStatus);
     }
 
     // Generate formatted rental agreement template
@@ -394,7 +393,10 @@ export class AgreementService {
       agreementObj.paymentStatus = agreement.get("computedTenantPaymentStatus") ||
         agreementObj.tenantSignature?.paymentStatus ||
         "no_payment";
-      agreementObj.canSignWithoutPayment = true;
+      const feeCharged =
+        agreement.agreementFeeStatus === "charged" || agreementObj.paymentStatus === "verified";
+      const feeAmount = agreement.agreementFeeAmount || 0;
+      agreementObj.canSignWithoutPayment = feeAmount <= 0 || feeCharged;
       if (!agreementObj.agreementFeeAmount && agreementObj.agreementFeeAmount !== 0) {
         agreementObj.agreementFeeAmount = agreement.agreementFeeAmount ?? 0;
       }
@@ -577,7 +579,21 @@ export class AgreementService {
         agreement,
         tenantIdStr
       );
-      (signatureData as any).paymentStatus = paymentStatus;
+
+      // Tenant must pay agreement fee before signing
+      if (
+        agreementFeeService.isFeeRequiredBeforeSign(agreement) &&
+        paymentStatus !== "verified"
+      ) {
+        if (paymentStatus === "pending_payment") {
+          throw new Error(
+            "Your agreement fee payment is pending admin approval. You can sign once it is verified."
+          );
+        }
+        throw new Error("Please pay the agreement fee before signing");
+      }
+
+      (signatureData as any).paymentStatus = paymentStatus === "verified" ? "verified" : paymentStatus;
     }
 
     // Check if user has already signed
@@ -1621,7 +1637,7 @@ Generated on ${new Date().toLocaleDateString('en-US', {
   }
 
   /**
-   * When both parties have signed, mark agreement executed and create rental (fee may still be deferred).
+   * When both parties have signed AND fee is verified, mark agreement executed and create rental.
    */
   private async completeAgreementIfBothSigned(
     agreement: IAgreement,
@@ -1647,8 +1663,24 @@ Generated on ${new Date().toLocaleDateString('en-US', {
         signedAt: tenantSig.signedAt,
         signatureUrl: tenantSig.signatureUrl || undefined,
         ipAddress: tenantSig.ipAddress,
-        paymentStatus: agreement.tenantSignature?.paymentStatus || "deferred",
+        paymentStatus: agreement.tenantSignature?.paymentStatus || "no_payment",
       } as any;
+    }
+
+    const tenantPaymentStatus = agreement.tenantSignature?.paymentStatus;
+    const feeCharged = agreement.agreementFeeStatus === "charged";
+    const feeRequired = (agreement.agreementFeeAmount || 0) > 0;
+    const tenantPaymentVerified =
+      !feeRequired ||
+      feeCharged ||
+      tenantPaymentStatus === "verified" ||
+      tenantPaymentStatus === undefined;
+
+    if (!tenantPaymentVerified) {
+      // Both signed but fee not verified yet — keep pending
+      agreement.status = "pending";
+      await agreement.save();
+      return;
     }
 
     const wasAlreadyExecuted =
@@ -1734,17 +1766,16 @@ Generated on ${new Date().toLocaleDateString('en-US', {
    * Send agreement notification (email + in-app + realtime socket)
    */
   private async sendAgreementNotification(notification: AgreementNotification): Promise<void> {
-    try {
-      const recipientUserId = this.refIdString(notification.recipientId);
-      const propertyIdStr = this.refIdString(notification.propertyId);
+    const recipientUserId = this.refIdString(notification.recipientId);
+    const propertyIdStr = this.refIdString(notification.propertyId);
 
+    try {
       const user = await User.findById(recipientUserId);
       if (!user) {
         console.warn(`User ${recipientUserId} not found`);
         return;
       }
 
-      const { emailNotificationService } = await import("./EmailNotificationService");
       const agreement = await Agreement.findById(notification.agreementId)
         .populate("propertyId", "title address")
         .populate("landlordId", "firstName lastName")
@@ -1758,36 +1789,13 @@ Generated on ${new Date().toLocaleDateString('en-US', {
       const property = agreement.propertyId as any;
       const landlord = agreement.landlordId as any;
       const tenant = agreement.tenantId as any;
-
-      if (user.email && notification.type === "created") {
-        await emailNotificationService.sendAgreementCreated({
-          recipientEmail: user.email,
-          recipientName: `${user.firstName} ${user.lastName}`,
-          recipientRole: notification.recipientRole,
-          agreementTitle: agreement.title,
-          propertyTitle: property?.title || property?.address || "Property",
-          landlordName: landlord ? `${landlord.firstName} ${landlord.lastName}` : "Landlord",
-          tenantName: tenant ? `${tenant.firstName} ${tenant.lastName}` : "Tenant",
-          agreementId: agreement._id.toString(),
-          startDate: agreement.startDate,
-          endDate: agreement.endDate,
-          rentAmount: agreement.rentAmount
-        });
-      } else if (notification.type !== "created") {
-        console.log(`Agreement Notification: ${notification.type}`, {
-          recipientId: recipientUserId,
-          recipientRole: notification.recipientRole,
-          signPhase: notification.signPhase,
-          message: notification.message,
-          agreementId: notification.agreementId,
-          propertyId: propertyIdStr
-        });
-      }
+      const propertyTitle = property?.title || property?.address || "Property";
 
       const { appNotificationService } = await import("./AppNotificationService");
 
       let inAppType: "agreement_created" | "agreement_signed" | "agreement_completed";
       let title: string;
+      let body = notification.message;
 
       if (notification.signPhase === "completed") {
         inAppType = "agreement_signed";
@@ -1803,10 +1811,16 @@ Generated on ${new Date().toLocaleDateString('en-US', {
         }
       } else if (notification.type === "created" || notification.type === "sent_for_review") {
         inAppType = "agreement_created";
-        title =
-          notification.type === "sent_for_review"
-            ? "Agreement ready for review"
-            : "New agreement";
+        if (notification.recipientRole === "landlord") {
+          title = "Sign agreement required";
+          body =
+            notification.message ||
+            `Please review and sign the tenancy agreement for ${propertyTitle}.`;
+        } else if (notification.type === "sent_for_review") {
+          title = "Agreement ready for review";
+        } else {
+          title = "New agreement";
+        }
       } else {
         inAppType = "agreement_signed";
         title = "Agreement update";
@@ -1816,18 +1830,52 @@ Generated on ${new Date().toLocaleDateString('en-US', {
         userId: recipientUserId,
         type: inAppType,
         title,
-        body: notification.message,
+        body,
         data: {
           agreementId: notification.agreementId,
           propertyId: propertyIdStr,
           senderId: notification.senderId,
           signedByRole: notification.signedByRole,
           signPhase: notification.signPhase,
+          recipientRole: notification.recipientRole,
+          path: "/agreements",
         },
       });
+
+      if (user.email && notification.type === "created") {
+        try {
+          const { emailNotificationService } = await import("./EmailNotificationService");
+          await emailNotificationService.sendAgreementCreated({
+            recipientEmail: user.email,
+            recipientName: `${user.firstName} ${user.lastName}`,
+            recipientRole: notification.recipientRole,
+            agreementTitle: agreement.title,
+            propertyTitle,
+            landlordName: landlord ? `${landlord.firstName} ${landlord.lastName}` : "Landlord",
+            tenantName: tenant ? `${tenant.firstName} ${tenant.lastName}` : "Tenant",
+            agreementId: agreement._id.toString(),
+            startDate: agreement.startDate,
+            endDate: agreement.endDate,
+            rentAmount: agreement.rentAmount,
+          });
+        } catch (emailError: any) {
+          console.error(
+            "Agreement email failed (in-app notification already sent):",
+            emailError?.message || emailError
+          );
+        }
+      } else if (notification.type !== "created") {
+        console.log(`Agreement Notification: ${notification.type}`, {
+          recipientId: recipientUserId,
+          recipientRole: notification.recipientRole,
+          signPhase: notification.signPhase,
+          message: notification.message,
+          agreementId: notification.agreementId,
+          propertyId: propertyIdStr,
+        });
+      }
     } catch (error: any) {
       console.error("Error sending agreement notification:", error);
-      // Don't throw - notification failure shouldn't break agreement flows
     }
   }
 
