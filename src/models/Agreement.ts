@@ -35,10 +35,14 @@ export interface IAgreement extends Document {
     paymentStatus?: "no_payment" | "pending_payment" | "payment_approved" | "verified" | "deferred";
   };
 
-  /** One-time agreement processing fee (USD 30–50); charged on first rent when deferred */
+  /** One-time agreement processing fee (USD 30–50); paid by tenant before signing */
   agreementFeeAmount?: number;
   agreementFeeStatus?: "pending" | "charged";
   agreementFeeChargedAt?: Date;
+
+  /** Snapshot of listing service fee terms at agreement creation */
+  serviceFeePayer?: "landlord" | "tenant";
+  serviceFeeAmount?: number;
   
   // Documents
   attachments: {
@@ -168,6 +172,13 @@ const agreementSchema = new Schema<IAgreement>({
     default: "pending",
   },
   agreementFeeChargedAt: { type: Date },
+
+  serviceFeePayer: {
+    type: String,
+    enum: ["landlord", "tenant"],
+    default: "landlord",
+  },
+  serviceFeeAmount: { type: Number, default: 10 },
   
   // Documents
   attachments: [{

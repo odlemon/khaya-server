@@ -28,6 +28,7 @@ export interface IProperty extends Document {
   zeroDepositAvailable: boolean;
   utilitiesIncluded: boolean;
   utilitiesCost?: number;
+  serviceFeePayer: "landlord" | "tenant";
   
   // Property Details
   bedrooms: number;
@@ -141,12 +142,18 @@ const propertySchema = new Schema<IProperty>(
     zeroDepositAvailable: { type: Boolean, default: false },
     utilitiesIncluded: { type: Boolean, default: false },
     utilitiesCost: { type: Number, min: 0 },
+    serviceFeePayer: {
+      type: String,
+      enum: ["landlord", "tenant"],
+      default: "landlord",
+    },
     
     // Property Details
     bedrooms: { type: Number, required: true, min: 0 },
     bathrooms: { type: Number, required: true, min: 0 },
     area: { type: Number, required: true, min: 0 },
-    floor: { type: Number, min: 0 },
+    // Negative values represent basement / lower-ground levels
+    floor: { type: Number, min: -10 },
     totalFloors: { type: Number, min: 1 },
     furnishingLevel: { 
       type: String, 

@@ -25,14 +25,15 @@ class AgreementFeeService {
 
   /**
    * Whether the one-time fee should be bundled into the first rent installment.
+   * Disabled — fee is paid separately before the tenant can sign.
    */
-  shouldDeferFeeToFirstRent(agreement: IAgreement | null): boolean {
-    if (!agreement) return false;
-    return agreement.agreementFeeStatus !== "charged" && (agreement.agreementFeeAmount || 0) > 0;
+  shouldDeferFeeToFirstRent(_agreement: IAgreement | null): boolean {
+    return false;
   }
 
   /**
    * Agreement fee portion to add to the first scheduled rent payment.
+   * Always 0 while fee is collected separately (upfront).
    */
   getFeePortionForFirstRent(agreement: IAgreement | null): number {
     if (!this.shouldDeferFeeToFirstRent(agreement)) return 0;
@@ -40,7 +41,17 @@ class AgreementFeeService {
   }
 
   /**
-   * Resolve tenant signature payment status (signing does not require upfront fee).
+   * True when tenant still owes the agreement fee before signing.
+   */
+  isFeeRequiredBeforeSign(agreement: IAgreement | null): boolean {
+    if (!agreement) return false;
+    if ((agreement.agreementFeeAmount || 0) <= 0) return false;
+    return agreement.agreementFeeStatus !== "charged";
+  }
+
+  /**
+   * Resolve tenant signature payment status.
+   * Fee must be paid upfront (no deferral to first rent).
    */
   async resolveTenantFeePaymentStatus(
     agreement: IAgreement,
@@ -82,7 +93,7 @@ class AgreementFeeService {
       return "pending_payment";
     }
 
-    return "deferred";
+    return "no_payment";
   }
 
   /**
@@ -114,6 +125,7 @@ class AgreementFeeService {
 
   /**
    * Attach fee breakdown metadata to first rent payment when missing (e.g. gateway-created payments).
+   * No-op while fee is not deferred to rent.
    */
   async ensureFirstRentMetadata(payment: IPayment, rental: IRental): Promise<void> {
     if (payment.paymentType !== "rent") return;
@@ -143,6 +155,7 @@ class AgreementFeeService {
 
   /**
    * Ensure metadata + collect deferred fee before rent escrow/deductions.
+   * Deferred collection is disabled — returns rent amount only.
    */
   async prepareRentPaymentForEscrow(
     payment: IPayment,
@@ -154,7 +167,7 @@ class AgreementFeeService {
 
   /**
    * When first rent is paid, collect deferred agreement fee and mark agreement charged.
-   * Returns extra revenue source id(s) to include in escrow.
+   * Currently disabled (fee paid separately before sign).
    */
   async applyAgreementFeeOnFirstRentPayment(
     payment: IPayment,
@@ -169,6 +182,11 @@ class AgreementFeeService {
 
     const agreement = await Agreement.findById(rental.agreementId);
     if (!agreement || agreement.agreementFeeStatus === "charged") {
+      return { rentAmountForDeductions };
+    }
+
+    // Safety: do not collect from rent while upfront-fee flow is active
+    if (!this.shouldDeferFeeToFirstRent(agreement)) {
       return { rentAmountForDeductions };
     }
 
@@ -199,7 +217,7 @@ class AgreementFeeService {
   }
 
   /**
-   * Mark agreement fee as charged after legacy upfront payment.
+   * Mark agreement fee as charged after upfront payment.
    */
   async markFeeChargedFromUpfrontPayment(agreement: IAgreement, amount: number): Promise<void> {
     agreement.agreementFeeStatus = "charged";

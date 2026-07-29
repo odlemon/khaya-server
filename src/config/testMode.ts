@@ -11,8 +11,8 @@
  * This allows testing the reminder system quickly
  */
 
-// Hardcoded for testing - set to false for production
-export const TEST_MODE = true;
+// Hardcoded for testing - set to false for production / normal monthly rent schedules
+export const TEST_MODE = false;
 
 // Time conversion ratios for test mode
 // Based on: 7 days = 4 minutes, so 1 day = 4/7 minutes ≈ 0.57 minutes

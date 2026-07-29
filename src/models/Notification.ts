@@ -1,5 +1,6 @@
 // @ts-nocheck
 import mongoose, { Document, Schema } from "mongoose";
+import { NotificationGroup, resolveNotificationGroup } from "../utils/notificationGroup";
 
 export type NotificationType =
   | "new_message"
@@ -21,7 +22,10 @@ export type NotificationType =
   | "agreement_completed"
   | "payment_received"
   | "maintenance_request"
-  | "maintenance_update";
+  | "maintenance_update"
+  | "document_verification_submitted"
+  | "document_verification_approved"
+  | "document_verification_rejected";
 
 export interface INotificationData {
   chatId?: string;
@@ -36,6 +40,7 @@ export interface INotificationData {
 export interface INotification extends Document {
   userId: mongoose.Types.ObjectId;
   type: NotificationType;
+  group: NotificationGroup;
   title: string;
   body: string;
   data: INotificationData;
@@ -76,8 +81,17 @@ const notificationSchema = new Schema<INotification>(
         "payment_received",
         "maintenance_request",
         "maintenance_update",
+        "document_verification_submitted",
+        "document_verification_approved",
+        "document_verification_rejected",
       ],
       required: true,
+    },
+    group: {
+      type: String,
+      enum: ["messages", "actions"],
+      required: true,
+      index: true,
     },
     title: { type: String, required: true, trim: true },
     body: { type: String, required: true, trim: true },
@@ -88,7 +102,15 @@ const notificationSchema = new Schema<INotification>(
   { timestamps: true }
 );
 
+notificationSchema.pre("validate", function (next) {
+  if (!this.group && this.type) {
+    this.group = resolveNotificationGroup(this.type);
+  }
+  next();
+});
+
 notificationSchema.index({ userId: 1, read: 1, createdAt: -1 });
+notificationSchema.index({ userId: 1, group: 1, read: 1, createdAt: -1 });
 
 export const Notification = mongoose.model<INotification>(
   "Notification",

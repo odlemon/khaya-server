@@ -20,6 +20,7 @@ class AppNotificationService {
         _id: saved._id,
         userId: saved.userId,
         type: saved.type,
+        group: saved.group,
         title: saved.title,
         body: saved.body,
         data: saved.data,

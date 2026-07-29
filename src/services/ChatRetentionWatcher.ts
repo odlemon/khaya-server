@@ -1,12 +1,13 @@
 // @ts-nocheck
 import type { ChangeStream } from "mongodb";
 import { Chat, Message } from "../models/Chat";
+import { deleteNotificationsForChatIds } from "./ChatRetentionService";
 import { logger } from "../utils/logger";
 
 let chatDeleteStream: ChangeStream | null = null;
 
 /**
- * When MongoDB TTL (or manual purge) deletes a Chat, remove orphaned messages.
+ * When MongoDB TTL (or manual purge) deletes a Chat, remove orphaned messages + notifications.
  */
 export function startChatRetentionWatcher(): void {
   if (chatDeleteStream) {
@@ -22,9 +23,10 @@ export function startChatRetentionWatcher(): void {
 
       try {
         const result = await Message.deleteMany({ chatId });
-        if (result.deletedCount > 0) {
+        const notifDeleted = await deleteNotificationsForChatIds([chatId as any]);
+        if (result.deletedCount > 0 || notifDeleted > 0) {
           logger.info(
-            `[ChatRetention] Cascade-deleted ${result.deletedCount} message(s) for chat ${chatId}`
+            `[ChatRetention] Cascade-deleted ${result.deletedCount} message(s), ${notifDeleted} notification(s) for chat ${chatId}`
           );
         }
       } catch (err: any) {

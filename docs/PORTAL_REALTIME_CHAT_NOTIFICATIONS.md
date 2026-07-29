@@ -289,7 +289,7 @@ On socket connect, the backend automatically puts admins in the `role:admin` mon
 4. Send: `POST /api/chat/:chatId/messages` (role `admin` in JWT)
 5. Private messages: use `@tenant` or `@landlord` in content
 
-Admin sees **all** messages including private @mentions. Admin also receives **in-app notifications** for every chat message (same as the intended recipient).
+Admin sees **all** messages including private @mentions via live `new_message` (chat monitoring). In-app / FCM **notifications** are created for admins only when a message tags `@admin` — not for every public chat message. See [ADMIN_NOTIFICATION_GROUPS_FRONTEND.md](./ADMIN_NOTIFICATION_GROUPS_FRONTEND.md) for the two-group admin inbox (messages vs actions).
 
 ---
 

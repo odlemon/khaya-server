@@ -514,7 +514,7 @@ export class EmailNotificationService {
               <strong>Next Steps:</strong><br>
               ${data.recipientRole === "landlord" 
                 ? "1. Review the agreement details<br>2. Sign the agreement<br>3. Wait for tenant to sign"
-                : "1. Review the agreement details<br>2. Sign after your landlord has signed<br>3. Pay your first rent installment (includes the agreement fee)"}
+                : "1. Review the agreement details<br>2. Pay the agreement processing fee<br>3. Sign after your landlord has signed"}
             </div>
 
             <div class="details">

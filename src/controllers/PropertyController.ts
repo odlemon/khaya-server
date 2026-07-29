@@ -12,7 +12,9 @@ import { Favorite } from "../models/Favorite";
 import { Types } from "mongoose";
 import { insuranceService } from "../services/InsuranceService";
 import { appNotificationService } from "../services/AppNotificationService";
+import { verificationNotificationService } from "../services/VerificationNotificationService";
 import { excludeActivelyRentedProperties } from "../utils/propertySearch";
+import { applyServiceFeeFields, PLATFORM_SERVICE_FEE } from "../utils/serviceFee";
 
 async function notifyAdminsPropertySubmitted(property: any, landlordId: string): Promise<void> {
   if (property.status !== "published" || property.isVerified) {
@@ -132,11 +134,30 @@ export class PropertyController {
         ];
       }
 
-      // Price filter
+      // Price filter (tenant sees tenantPayableRent: base rent + $10 when tenant pays fee)
       if (minPrice || maxPrice) {
-        query.price = {};
-        if (minPrice) query.price.$gte = Number(minPrice);
-        if (maxPrice) query.price.$lte = Number(maxPrice);
+        const min = minPrice ? Number(minPrice) : undefined;
+        const max = maxPrice ? Number(maxPrice) : undefined;
+        const fee = PLATFORM_SERVICE_FEE;
+
+        const landlordPaidClause: any = { serviceFeePayer: { $ne: "tenant" } };
+        const tenantPaidClause: any = { serviceFeePayer: "tenant" };
+        if (min !== undefined) {
+          landlordPaidClause.price = { ...landlordPaidClause.price, $gte: min };
+          tenantPaidClause.price = { ...tenantPaidClause.price, $gte: min - fee };
+        }
+        if (max !== undefined) {
+          landlordPaidClause.price = { ...landlordPaidClause.price, $lte: max };
+          tenantPaidClause.price = { ...tenantPaidClause.price, $lte: max - fee };
+        }
+
+        const priceOr = [landlordPaidClause, tenantPaidClause];
+        if (query.$or) {
+          query.$and = [{ $or: query.$or }, { $or: priceOr }];
+          delete query.$or;
+        } else {
+          query.$or = priceOr;
+        }
       }
 
       // Bedrooms filter
@@ -292,6 +313,7 @@ export class PropertyController {
             isActive: conn.isActive,
             canChat: conn.status === "accepted" && conn.isActive,
             message: conn.message,
+            proposedViewingDate: conn.proposedViewingDate,
             responseMessage: conn.responseMessage,
             respondedAt: conn.respondedAt,
             createdAt: conn.createdAt
@@ -320,6 +342,7 @@ export class PropertyController {
                  // Add connection status, boost info, zero deposit info, and favorite status to each property
         properties = properties.map(property => {
           const propertyObj = property.toObject();
+          applyServiceFeeFields(propertyObj);
           const propertyIdStr = property._id.toString();
           const connection = connectionMap.get(propertyIdStr);
           const boostInfo = boostMap.get(propertyIdStr);
@@ -347,6 +370,7 @@ export class PropertyController {
         // For non-authenticated users or non-tenants, add false connection status, boost info, zero deposit info, and favorite status
         properties = properties.map(property => {
           const propertyObj = property.toObject();
+          applyServiceFeeFields(propertyObj);
           const propertyIdStr = property._id.toString();
           const boostInfo = boostMap.get(propertyIdStr);
           const landlordIdStr = property.landlordId?._id?.toString() || property.landlordId?.toString();
@@ -489,6 +513,7 @@ export class PropertyController {
       }
 
       let propertyData = propertyWithVerification.toObject();
+      applyServiceFeeFields(propertyData);
 
       // Check if current user is the landlord
       const isLandlord = userId && propertyWithVerification.landlordId.toString() === userId.toString();
@@ -702,7 +727,8 @@ export class PropertyController {
       // Add verification status and details to each property
       const propertiesWithVerification = properties.map(property => {
         const propertyObj = property.toObject();
-        
+        applyServiceFeeFields(propertyObj);
+
         // Determine verification status
         let verificationStatus = "pending";
         if (property.isVerified && property.verifiedAt) {
@@ -923,6 +949,7 @@ export class PropertyController {
 
         properties = properties.map(property => {
           const propertyObj = property.toObject();
+          applyServiceFeeFields(propertyObj);
           const propertyIdStr = property._id.toString();
           const connection = connectionMap.get(propertyIdStr);
           const boostInfo = boostMap.get(propertyIdStr);
@@ -942,6 +969,7 @@ export class PropertyController {
       } else {
         properties = properties.map(property => {
           const propertyObj = property.toObject();
+          applyServiceFeeFields(propertyObj);
           const propertyIdStr = property._id.toString();
           const boostInfo = boostMap.get(propertyIdStr);
           const landlordIdStr = property.landlordId?._id?.toString() || property.landlordId?.toString();
@@ -1011,9 +1039,28 @@ export class PropertyController {
       }
 
       if (otherFilters.minPrice || otherFilters.maxPrice) {
-        query.price = {};
-        if (otherFilters.minPrice) query.price.$gte = Number(otherFilters.minPrice);
-        if (otherFilters.maxPrice) query.price.$lte = Number(otherFilters.maxPrice);
+        const min = otherFilters.minPrice ? Number(otherFilters.minPrice) : undefined;
+        const max = otherFilters.maxPrice ? Number(otherFilters.maxPrice) : undefined;
+        const fee = PLATFORM_SERVICE_FEE;
+
+        const landlordPaidClause: any = { serviceFeePayer: { $ne: "tenant" } };
+        const tenantPaidClause: any = { serviceFeePayer: "tenant" };
+        if (min !== undefined) {
+          landlordPaidClause.price = { ...landlordPaidClause.price, $gte: min };
+          tenantPaidClause.price = { ...tenantPaidClause.price, $gte: min - fee };
+        }
+        if (max !== undefined) {
+          landlordPaidClause.price = { ...landlordPaidClause.price, $lte: max };
+          tenantPaidClause.price = { ...tenantPaidClause.price, $lte: max - fee };
+        }
+
+        const priceOr = [landlordPaidClause, tenantPaidClause];
+        if (query.$or) {
+          query.$and = [{ $or: query.$or }, { $or: priceOr }];
+          delete query.$or;
+        } else {
+          query.$or = priceOr;
+        }
       }
 
       if (otherFilters.bedrooms) query.bedrooms = Number(otherFilters.bedrooms);
@@ -1049,6 +1096,7 @@ export class PropertyController {
           status: conn.status,
           canChat: conn.status === "accepted" && conn.isActive,
           message: conn.message,
+          proposedViewingDate: conn.proposedViewingDate,
           responseMessage: conn.responseMessage,
           respondedAt: conn.respondedAt
         });
@@ -1057,6 +1105,7 @@ export class PropertyController {
       // Add connection status to each property
       properties = properties.map(property => {
         const propertyObj = property.toObject();
+        applyServiceFeeFields(propertyObj);
         const connection = connectionMap.get(property._id.toString());
         return {
           ...propertyObj,
@@ -1124,9 +1173,15 @@ export class PropertyController {
       };
       await excludeActivelyRentedProperties(nearbyQuery);
 
-      const properties = await Property.find(nearbyQuery)
+      const rawProperties = await Property.find(nearbyQuery)
         .populate("landlordId", "firstName lastName")
         .limit(Number(limit));
+
+      const properties = rawProperties.map(p => {
+        const obj = p.toObject();
+        applyServiceFeeFields(obj);
+        return obj;
+      });
 
       res.status(200).json({ 
         success: true, 
@@ -1224,6 +1279,7 @@ export class PropertyController {
         status: connection.status,
         canChat: connection.status === "accepted" && connection.isActive,
         message: connection.message,
+        proposedViewingDate: connection.proposedViewingDate,
         responseMessage: connection.responseMessage,
         respondedAt: connection.respondedAt,
         createdAt: connection.createdAt
@@ -1412,18 +1468,19 @@ export class PropertyController {
       await property.save();
 
       try {
-        await appNotificationService.notify({
-          userId: property.landlordId.toString(),
-          type: "property_verified",
-          title: "Listing verified",
-          body: `Your property "${property.title || property.address}" is now verified and live`,
-          data: { propertyId: property._id.toString() },
+        await verificationNotificationService.notifyPropertyResult({
+          landlordId: property.landlordId.toString(),
+          propertyId: property._id.toString(),
+          propertyTitle: property.title || "Property",
+          status: "verified",
+          adminFeedback: property.adminFeedback,
         });
       } catch (notifyErr) {
         console.error("In-app notify (property verified):", notifyErr?.message || notifyErr);
       }
 
       const propertyData = property.toObject();
+      applyServiceFeeFields(propertyData);
       propertyData.verificationStatus = "verified";
 
       return res.status(200).json({
@@ -1475,18 +1532,20 @@ export class PropertyController {
       await property.save();
 
       try {
-        await appNotificationService.notify({
-          userId: property.landlordId.toString(),
-          type: "property_rejected",
-          title: "Listing rejected",
-          body: `Your property "${property.title || property.address}" was not approved: ${rejectionReason}`,
-          data: { propertyId: property._id.toString() },
+        await verificationNotificationService.notifyPropertyResult({
+          landlordId: property.landlordId.toString(),
+          propertyId: property._id.toString(),
+          propertyTitle: property.title || "Property",
+          status: "rejected",
+          rejectionReason,
+          adminFeedback,
         });
       } catch (notifyErr) {
         console.error("In-app notify (property rejected):", notifyErr?.message || notifyErr);
       }
 
       const propertyData = property.toObject();
+      applyServiceFeeFields(propertyData);
       propertyData.verificationStatus = "rejected";
 
       return res.status(200).json({

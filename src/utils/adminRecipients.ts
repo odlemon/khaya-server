@@ -6,7 +6,8 @@ let cachedAt = 0;
 const CACHE_TTL_MS = 60_000;
 
 /**
- * Active Khayalami admin user IDs — notified on all chat activity.
+ * Active Khayalami admin user IDs — used for @admin mentions and
+ * admin-attention actions (property/doc verification, agreements, etc.).
  */
 export async function getActiveAdminUserIds(excludeUserId?: string): Promise<string[]> {
   const now = Date.now();

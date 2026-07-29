@@ -165,7 +165,8 @@ export class InvoiceService {
         quantity: 1
       });
 
-      // Add deductions as line items (if applicable)
+      // Add deductions as line items only when the tenant bears them.
+      // Landlord-borne deductions are payout deductions and must not inflate the tenant invoice.
       if (deductions) {
         if (deductions.subscriptionFee > 0) {
           lineItems.push({
@@ -173,9 +174,9 @@ export class InvoiceService {
             amount: deductions.subscriptionFee
           });
         }
-        if (deductions.processingFee > 0) {
+        if (deductions.processingFee > 0 && deductions.serviceFeePayer === "tenant") {
           lineItems.push({
-            description: `Processing Fee (${(deductions.breakdown.processingFeeRate * 100).toFixed(1)}%)`,
+            description: "Service Fee",
             amount: deductions.processingFee
           });
         }

@@ -12,6 +12,9 @@ export interface IRental extends Document {
   endDate: Date;
   monthlyRent: number;
   depositAmount: number;
+
+  serviceFeePayer: "landlord" | "tenant";
+  serviceFeeAmount: number;
   
   // Payment tracking
   nextPaymentDue: Date;
@@ -69,6 +72,13 @@ const rentalSchema = new Schema<IRental>({
   endDate: { type: Date, required: true },
   monthlyRent: { type: Number, required: true },
   depositAmount: { type: Number, default: 0 },
+
+  serviceFeePayer: {
+    type: String,
+    enum: ["landlord", "tenant"],
+    default: "landlord",
+  },
+  serviceFeeAmount: { type: Number, default: 10 },
   
   nextPaymentDue: { type: Date },
   

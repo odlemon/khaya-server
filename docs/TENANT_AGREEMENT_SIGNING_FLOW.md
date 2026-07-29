@@ -4,10 +4,10 @@
 
 When a tenant wants to sign an agreement, they must:
 1. **Wait for landlord to sign first** (if not already signed)
-2. **Sign the agreement** (no upfront fee required)
-3. **Pay the agreement processing fee with the first rent installment** (one-time USD 30–50, bundled into the first scheduled rent payment)
+2. **Pay the agreement processing fee** (one-time USD 30–50, online or external proof)
+3. **Sign the agreement** (only after fee is verified / charged)
 
-**Important:** The agreement fee is a **one-time payment**, NOT a subscription. Tenants may still pay the fee upfront via the legacy `pay-fee` endpoint or an external payment request if they prefer.
+**Important:** The agreement fee is a **one-time payment**, paid **separately before signing**. It is **not** bundled into the first rent installment.
 
 ---
 
@@ -23,15 +23,28 @@ Authorization: Bearer <tenant_token>
 
 **Check:**
 - ✅ Is landlord signed? (`landlordSignature.signedAt` exists)
-- ✅ Can tenant sign? (`canSignWithoutPayment: true` when landlord has signed)
+- ✅ Has fee been paid? (`agreementFeeStatus === "charged"` or `paymentStatus === "verified"`)
+- ✅ Can tenant sign? (`canSignWithoutPayment: true` only when fee is charged or fee amount is 0)
 - ✅ Agreement fee: `agreementFeeAmount`, `agreementFeeStatus` (`pending` | `charged`)
-- ✅ Tenant fee state: `tenantSignature.paymentStatus` — `deferred` (default), `verified` (paid upfront), or `pending_payment` (external fee awaiting admin)
+- ✅ Tenant fee state: `tenantSignature.paymentStatus` — `no_payment`, `pending_payment`, or `verified`
 
-**Note:** Signing no longer requires upfront payment. After both parties sign, the rental is created and the fee is added to the **first** rent payment only.
+**Note:** Signing requires the agreement fee to be paid first. After both parties sign (with fee verified), the rental is created. Rent payments do **not** include the agreement fee.
 
 ---
 
-### Step 2: Sign Agreement (No Upfront Fee Required)
+### Step 2: Pay Agreement Fee (Required Before Sign)
+
+Tenants must pay before signing. Use:
+
+- **Online:** `POST /api/agreements/:id/pay-fee`
+- **External:** payment request with `requestType: "agreement_fee"` (admin approval)
+
+**Payment Status Options:**
+- **Unpaid:** `paymentStatus: "no_payment"` — cannot sign
+- **Pending admin:** `paymentStatus: "pending_payment"` — cannot sign yet
+- **Paid:** `paymentStatus: "verified"` / `agreementFeeStatus: "charged"` — can sign
+
+### Step 3: Sign Agreement
 
 **Endpoint:**
 ```
@@ -39,20 +52,7 @@ POST /api/agreements/:id/sign
 Authorization: Bearer <tenant_token>
 ```
 
-When the tenant signs without paying upfront, `tenantSignature.paymentStatus` is set to **`deferred`**. When both parties have signed, the agreement moves to `status: "signed"` and a rental is created automatically.
-
----
-
-### Step 3: Pay Agreement Fee (Optional Upfront — Legacy)
-
-Tenants who want to pay before signing can still use the flows below. If the fee is paid upfront, `agreementFeeStatus` becomes `charged` and it is **not** added to the first rent payment.
-
-**Payment Status Options:**
-- **Deferred (default):** Sign first → fee collected on first rent payment (`paymentStatus: "deferred"`)
-- **Online upfront:** `POST /api/agreements/:id/pay-fee` → `paymentStatus: "verified"`
-- **External upfront:** Payment request → admin approval → `paymentStatus: "verified"`
-
-#### Option A: External Payment (Payment Request)
+If the fee is not verified, the API returns an error asking the tenant to pay first.
 
 **Endpoint:**
 ```
@@ -107,14 +107,13 @@ Authorization: Bearer <tenant_token>
 
 ---
 
-### Step 4: First Rent Payment (Default Fee Collection)
+### Step 4: Rent Payments (No Agreement Fee)
 
-After the rental is created, the **first** scheduled rent payment amount includes:
+After the rental is created, scheduled rent payments include:
 - Monthly rent
 - Insurance surcharge (if `added_to_rent` on the property)
-- Agreement processing fee (if `agreementFeeStatus === "pending"`)
 
-Subsequent rent payments exclude the agreement fee. Payment `metadata` includes `rentPortion`, `agreementFeePortion`, and `insurancePortion` for reconciliation.
+They do **not** include the agreement processing fee (already paid separately before signing).
 
 ---
 

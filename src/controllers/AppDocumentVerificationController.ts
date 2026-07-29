@@ -2,6 +2,7 @@
 import { Request, Response, NextFunction } from "express";
 import { DocumentVerificationService } from "../services/DocumentVerificationService";
 import { User } from "../models/User";
+import { appNotificationService } from "../services/AppNotificationService";
 
 export class AppDocumentVerificationController {
   /**
@@ -260,7 +261,9 @@ export class AppDocumentVerificationController {
       const userId = (req as any).user._id;
       
       // Check if already submitted
-      const user = await User.findById(userId).select("documentVerification.status");
+      const user = await User.findById(userId).select(
+        "firstName lastName email role documentVerification.status"
+      );
       if (user?.documentVerification.status === "verified") {
         return res.status(400).json({
           success: false,
@@ -281,6 +284,32 @@ export class AppDocumentVerificationController {
       });
 
       console.log(`✅ User ${userId} submitted documents for review - Admin can now see this request`);
+
+      const userIdStr = userId.toString();
+      const role = user?.role || "user";
+      const displayName =
+        [user?.firstName, user?.lastName].filter(Boolean).join(" ").trim() ||
+        user?.email ||
+        "A user";
+
+      try {
+        await appNotificationService.notifyAdmins(
+          () => ({
+            type: "document_verification_submitted",
+            title: "Document verification pending",
+            body: `${displayName} (${role}) submitted documents for review`,
+            data: {
+              userId: userIdStr,
+              role,
+              senderId: userIdStr,
+              path: "/admin/verifications",
+            },
+          }),
+          userIdStr
+        );
+      } catch (err: any) {
+        console.error("In-app notify (document verification submitted):", err?.message || err);
+      }
 
       res.status(200).json({
         success: true,

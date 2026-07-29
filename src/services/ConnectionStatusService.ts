@@ -30,6 +30,7 @@ export class ConnectionStatusService {
         status: connection.status,
         canChat: connection.status === "accepted" && connection.isActive,
         message: connection.message,
+        proposedViewingDate: connection.proposedViewingDate,
         responseMessage: connection.responseMessage,
         respondedAt: connection.respondedAt,
         createdAt: connection.createdAt,
@@ -88,6 +89,7 @@ export class ConnectionStatusService {
         status: conn.status,
         canChat: conn.status === "accepted" && conn.isActive,
         message: conn.message,
+        proposedViewingDate: conn.proposedViewingDate,
         responseMessage: conn.responseMessage,
         respondedAt: conn.respondedAt,
         createdAt: conn.createdAt
@@ -129,6 +131,7 @@ export class ConnectionStatusService {
           status: conn.status,
           canChat: conn.status === "accepted" && conn.isActive,
           message: conn.message,
+          proposedViewingDate: conn.proposedViewingDate,
           responseMessage: conn.responseMessage,
           respondedAt: conn.respondedAt,
           createdAt: conn.createdAt,

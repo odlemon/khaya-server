@@ -13,6 +13,40 @@ import {
   findTenantActiveRental,
   TENANT_ACTIVE_RENTAL_MESSAGE,
 } from "../utils/tenantRentalLimits";
+import { buildAcceptedRentalRequestMessage } from "../utils/rentalRequestAutoMessage";
+
+function parseProposedViewingDate(
+  value: unknown
+): { date?: Date; error?: string } {
+  if (value === undefined || value === null || value === "") {
+    return {};
+  }
+
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return { error: "proposedViewingDate must be in YYYY-MM-DD format" };
+  }
+
+  const [year, month, day] = value.split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  const isValidDate =
+    date.getUTCFullYear() === year &&
+    date.getUTCMonth() === month - 1 &&
+    date.getUTCDate() === day;
+
+  if (!isValidDate) {
+    return { error: "proposedViewingDate must be a valid date in YYYY-MM-DD format" };
+  }
+
+  const now = new Date();
+  const todayUtc = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())
+  );
+  if (date < todayUtc) {
+    return { error: "proposedViewingDate cannot be in the past" };
+  }
+
+  return { date };
+}
 
 export class ConnectionController {
 
@@ -27,6 +61,7 @@ export class ConnectionController {
         propertyId, 
         landlordId, 
         message,
+        proposedViewingDate,
         expectedMoveInDate,
         expectedBudgetMin,
         expectedBudgetMax,
@@ -51,6 +86,14 @@ export class ConnectionController {
         return res.status(400).json({
           success: false,
           message: "Property ID, landlord ID, and message are required"
+        });
+      }
+
+      const viewingDateResult = parseProposedViewingDate(proposedViewingDate);
+      if (viewingDateResult.error) {
+        return res.status(400).json({
+          success: false,
+          message: viewingDateResult.error
         });
       }
 
@@ -112,6 +155,9 @@ export class ConnectionController {
       );
 
       const tenantDetails: any = {};
+      if (viewingDateResult.date) {
+        tenantDetails.proposedViewingDate = viewingDateResult.date;
+      }
       if (expectedMoveInDate) tenantDetails.expectedMoveInDate = new Date(expectedMoveInDate);
       if (expectedBudgetMin !== undefined || expectedBudgetMax !== undefined) {
         const min = expectedBudgetMin !== undefined ? Number(expectedBudgetMin) : undefined;
@@ -459,6 +505,7 @@ export class ConnectionController {
           isActive: connection.isActive,
           requestId: connection._id,
           message: connection.message,
+          proposedViewingDate: connection.proposedViewingDate,
           responseMessage: connection.responseMessage,
           createdAt: connection.createdAt,
           respondedAt: connection.respondedAt
@@ -740,8 +787,9 @@ export class ConnectionController {
       const notifyConnectionId = connection._id.toString();
 
       await connection.populate([
-        { path: "propertyId", select: "title" },
+        { path: "propertyId", select: "title address" },
         { path: "landlordId", select: "firstName lastName" },
+        { path: "tenantId", select: "firstName lastName" },
       ]);
 
       const propertyDoc = connection.propertyId as any;
@@ -776,19 +824,24 @@ export class ConnectionController {
           notifyPropertyId
         );
 
-        // Send initial message from landlord
-        const initialMessage = responseMessage || "Thank you for contacting me! I'd be happy to help you with this property. How can I assist you today?";
+        // Auto-send the tenant's submitted rental details as the first chat message.
+        // This is deliberately sent as the tenant so the conversation opens with
+        // their request narrative, rather than a synthetic landlord reply.
+        const initialMessage = buildAcceptedRentalRequestMessage(
+          connection,
+          propertyDoc
+        );
         
         const initialMsg = await chatService.sendMessage({
           chatId: chat._id.toString(),
-          senderId: notifyLandlordId,
-          senderRole: "landlord",
+          senderId: notifyTenantId,
+          senderRole: "tenant",
           messageType: "text",
           content: initialMessage
         });
 
         emitChatMessageRealtime(req, chat._id.toString(), initialMsg, {
-          senderId: notifyLandlordId,
+          senderId: notifyTenantId,
         });
 
         console.log("🔍 DEBUG: Chat created and initial message sent successfully");

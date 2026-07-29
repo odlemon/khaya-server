@@ -332,9 +332,9 @@ When a tenant pays rent, the following deductions are automatically calculated:
    - Deducted from: Rent payment
    - Goes to: Khayalami
 
-2. **Processing Fee**
-   - Amount: 1.5-2% of rent amount
-   - Deducted from: Rent payment
+2. **Service Fee** (fixed $10)
+   - Amount: USD 10 flat per monthly installment
+   - Paid by: landlord (deducted from payout) **or** tenant (added to rent), as chosen by landlord at listing time. See `FIXED_RENT_SERVICE_FEE_FRONTEND.md` for full details.
    - Goes to: Khayalami
 
 3. **Insurance Premium** (if landlord opted in)
@@ -342,15 +342,26 @@ When a tenant pays rent, the following deductions are automatically calculated:
    - Deducted from: Rent payment
    - Goes to: Insurance provider (Khayalami gets commission)
 
-### Example Calculation
+### Example Calculation (landlord-paid fee)
 
 **Rent Amount:** $500
 **Subscription Fee:** $4.99 (if active)
-**Processing Fee:** $10 (2% of $500)
+**Service Fee:** $10 (flat, deducted from landlord payout)
 **Insurance Premium:** $0 (if not applicable)
 
 **Total Deductions:** $14.99
 **Landlord Receives:** $485.01
+**Khayalami Receives:** $14.99
+
+### Example Calculation (tenant-paid fee)
+
+**Rent Amount:** $500 + $10 service fee = **$510 charged to tenant**
+**Subscription Fee:** $4.99 (if active)
+**Service Fee:** $10 (already included in charged amount)
+**Insurance Premium:** $0
+
+**Total Deductions:** $14.99
+**Landlord Receives:** $495.01
 **Khayalami Receives:** $14.99
 
 ---
@@ -686,7 +697,7 @@ const response = await fetch(`/api/payments/rental/${rentalId}/create`, {
 
 4. **Deductions**: Deductions are automatically calculated:
    - Subscription fee (if tenant has active subscription)
-   - Processing fee (1.5-2% of rent)
+   - Service fee (flat $10 — see `FIXED_RENT_SERVICE_FEE_FRONTEND.md`)
    - Insurance premium (if applicable)
 
 5. **Payment Request Status**: External payment requests go through admin review:
