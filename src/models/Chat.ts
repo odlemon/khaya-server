@@ -10,7 +10,11 @@ export interface IChat extends Document {
     timestamp: Date;
   };
   isActive: boolean;
-  /** Last conversation activity — used for inactivity auto-delete (TTL) */
+  /** When true, chat is not auto-archived after inactivity (e.g. active rental). */
+  keepAlive: boolean;
+  /** Set when chat is archived due to inactivity or manual archive. */
+  archivedAt?: Date;
+  /** Last conversation activity — used for inactivity auto-archive */
   lastActivityAt: Date;
   metadata?: {
     retentionTestDummy?: boolean;
@@ -21,9 +25,12 @@ export interface IChat extends Document {
   updatedAt: Date;
 }
 
-/** Chats with no activity for this long are auto-deleted (5 days). */
-export const CHAT_INACTIVITY_TTL_SECONDS = 5 * 24 * 60 * 60;
-export const CHAT_INACTIVITY_TTL_DAYS = 5;
+/** Chats with no activity for this long are auto-archived (5 days). */
+export const CHAT_INACTIVITY_ARCHIVE_SECONDS = 5 * 24 * 60 * 60;
+export const CHAT_INACTIVITY_ARCHIVE_DAYS = 5;
+/** @deprecated Use CHAT_INACTIVITY_ARCHIVE_SECONDS — kept for scripts/tests */
+export const CHAT_INACTIVITY_TTL_SECONDS = CHAT_INACTIVITY_ARCHIVE_SECONDS;
+export const CHAT_INACTIVITY_TTL_DAYS = CHAT_INACTIVITY_ARCHIVE_DAYS;
 
 export interface IMessage extends Document {
   chatId: mongoose.Types.ObjectId;
@@ -101,6 +108,14 @@ const chatSchema = new Schema<IChat>({
   isActive: {
     type: Boolean,
     default: true
+  },
+  keepAlive: {
+    type: Boolean,
+    default: false,
+  },
+  archivedAt: {
+    type: Date,
+    default: undefined,
   },
   lastActivityAt: {
     type: Date,
@@ -215,10 +230,8 @@ const messageSchema = new Schema<IMessage>({
 chatSchema.index({ participants: 1 });
 chatSchema.index({ propertyId: 1 });
 chatSchema.index({ "lastMessage.timestamp": -1 });
-chatSchema.index(
-  { lastActivityAt: 1 },
-  { expireAfterSeconds: CHAT_INACTIVITY_TTL_SECONDS }
-);
+chatSchema.index({ lastActivityAt: 1 });
+chatSchema.index({ isActive: 1, participants: 1 });
 
 messageSchema.index({ chatId: 1, createdAt: -1 });
 messageSchema.index({ senderId: 1 });

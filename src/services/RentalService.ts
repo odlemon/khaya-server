@@ -14,8 +14,60 @@ import {
 } from "../utils/rentalCapabilities";
 import { enrichRentalForApi } from "../utils/enrichRentalResponse";
 import { assertTenantHasNoActiveRental } from "../utils/tenantRentalLimits";
+import { Chat } from "../models/Chat";
 
 export class RentalService {
+  /**
+   * Protect landlord–tenant chat from inactivity archive while rental is active.
+   */
+  private async protectChatForActiveRental(
+    tenantId: unknown,
+    landlordId: unknown,
+    propertyId: unknown
+  ): Promise<void> {
+    const tenantIdStr = tenantId?.toString?.() || String(tenantId);
+    const landlordIdStr = landlordId?.toString?.() || String(landlordId);
+    const propertyIdStr = propertyId?.toString?.() || String(propertyId);
+
+    const result = await Chat.updateOne(
+      {
+        participants: { $all: [tenantIdStr, landlordIdStr] },
+        propertyId: propertyIdStr,
+      },
+      {
+        $set: { keepAlive: true, isActive: true },
+        $unset: { archivedAt: "" },
+      }
+    );
+
+    if (result.modifiedCount > 0 || result.matchedCount > 0) {
+      console.log(
+        `💬 Chat keepAlive enabled for rental (tenant=${tenantIdStr}, property=${propertyIdStr})`
+      );
+    }
+  }
+
+  /**
+   * Allow inactivity archive again after rental ends.
+   */
+  private async releaseChatKeepAlive(
+    tenantId: unknown,
+    landlordId: unknown,
+    propertyId: unknown
+  ): Promise<void> {
+    const tenantIdStr = tenantId?.toString?.() || String(tenantId);
+    const landlordIdStr = landlordId?.toString?.() || String(landlordId);
+    const propertyIdStr = propertyId?.toString?.() || String(propertyId);
+
+    await Chat.updateOne(
+      {
+        participants: { $all: [tenantIdStr, landlordIdStr] },
+        propertyId: propertyIdStr,
+      },
+      { $set: { keepAlive: false } }
+    );
+  }
+
   /**
    * Mark property off-market for tenant search.
    */
@@ -80,6 +132,11 @@ export class RentalService {
     if (existingRental) {
       console.log(`✅ Rental already exists for agreement: ${agreementId}`);
       await this.markPropertyAsRented(agreement.propertyId);
+      await this.protectChatForActiveRental(
+        agreement.tenantId,
+        agreement.landlordId,
+        agreement.propertyId
+      );
       return existingRental;
     }
 
@@ -112,6 +169,12 @@ export class RentalService {
     console.log(`📅 Creating payment schedule for rental: ${rental._id}`);
     await this.createPaymentSchedule(rental);
     console.log(`✅ Payment schedule created for rental: ${rental._id}`);
+
+    await this.protectChatForActiveRental(
+      agreement.tenantId,
+      agreement.landlordId,
+      agreement.propertyId
+    );
 
     return rental;
   }
@@ -835,6 +898,12 @@ export class RentalService {
     await rental.save();
 
     await Property.findByIdAndUpdate(rental.propertyId, { status: "inactive" });
+
+    await this.releaseChatKeepAlive(
+      rental.tenantId,
+      rental.landlordId,
+      rental.propertyId
+    );
 
     console.log(`🔚 Rental ended: ${rentalId} — property set inactive (off search)`);
 

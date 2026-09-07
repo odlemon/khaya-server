@@ -629,7 +629,29 @@ export class AgreementController {
   }
 
   /**
-   * Generate agreement PDF
+   * Download agreement PDF via public token (no auth).
+   */
+  async downloadPublicAgreementPdf(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { token } = req.params;
+      const agreement = await agreementService.getAgreementByPublicPdfToken(token);
+      const { buildAgreementPdfBuffer, getAgreementPdfFilename } = await import("../services/AgreementPdfService");
+      const buffer = await buildAgreementPdfBuffer(agreement);
+      const filename = getAgreementPdfFilename(agreement);
+
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+      res.send(buffer);
+    } catch (error: any) {
+      if (error.message === "Agreement not found") {
+        return res.status(404).json({ success: false, message: "Agreement not found" });
+      }
+      next(error);
+    }
+  }
+
+  /**
+   * Generate agreement PDF (authenticated — streams file)
    */
   async generateAgreementPDF(req: Request, res: Response, next: NextFunction) {
     try {
@@ -637,15 +659,13 @@ export class AgreementController {
       const userId = (req as any).user._id;
       const userRole = (req as any).user.role;
 
-      // Verify user has access to this agreement
       await agreementService.getAgreementById(id, userId, userRole);
 
-      const pdfUrl = await agreementService.generateAgreementPDF(id);
+      const { buffer, filename } = await agreementService.buildAgreementPdfBytes(id);
 
-      res.status(200).json({
-        success: true,
-        data: { pdfUrl }
-      });
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+      res.send(buffer);
     } catch (error: any) {
       next(error);
     }

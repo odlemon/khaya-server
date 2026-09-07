@@ -168,6 +168,7 @@ export class AgreementService {
       ...data,
       status: "pending",
       type: "tenancy",
+      publicPdfToken: crypto.randomBytes(32).toString("hex"),
       agreementFeeAmount,
       agreementFeeStatus: "pending",
       serviceFeePayer: resolveServiceFeePayer((property as any).serviceFeePayer),
@@ -1221,9 +1222,42 @@ export class AgreementService {
   }
 
   /**
-   * Generate agreement PDF (placeholder)
+   * Ensure agreement has a public PDF download token (for email links).
    */
-  async generateAgreementPDF(agreementId: string): Promise<string> {
+  async ensurePublicPdfToken(agreementId: string): Promise<string> {
+    const agreement = await Agreement.findById(agreementId).select("publicPdfToken");
+    if (!agreement) {
+      throw new Error("Agreement not found");
+    }
+    if (agreement.publicPdfToken) {
+      return agreement.publicPdfToken;
+    }
+    const token = crypto.randomBytes(32).toString("hex");
+    agreement.publicPdfToken = token;
+    await agreement.save();
+    return token;
+  }
+
+  /**
+   * Load agreement by public PDF token (unauthenticated download).
+   */
+  async getAgreementByPublicPdfToken(token: string): Promise<IAgreement> {
+    const agreement = await Agreement.findOne({ publicPdfToken: token })
+      .populate("propertyId", "title address")
+      .populate("landlordId", "firstName lastName email phone")
+      .populate("tenantId", "firstName lastName email phone");
+
+    if (!agreement) {
+      throw new Error("Agreement not found");
+    }
+
+    return agreement;
+  }
+
+  /**
+   * Generate agreement PDF bytes for download.
+   */
+  async buildAgreementPdfBytes(agreementId: string): Promise<{ buffer: Buffer; filename: string }> {
     const agreement = await Agreement.findById(agreementId)
       .populate("propertyId", "title address")
       .populate("landlordId", "firstName lastName email phone")
@@ -1233,9 +1267,18 @@ export class AgreementService {
       throw new Error("Agreement not found");
     }
 
-    // This would integrate with a PDF generation service
-    // For now, return a placeholder URL
-    return `https://api.khayalami.com/agreements/${agreementId}/pdf`;
+    const { buildAgreementPdfBuffer, getAgreementPdfFilename } = await import("./AgreementPdfService");
+    const buffer = await buildAgreementPdfBuffer(agreement);
+    return { buffer, filename: getAgreementPdfFilename(agreement) };
+  }
+
+  /**
+   * Generate agreement PDF (legacy JSON endpoint — returns download path hint).
+   */
+  async generateAgreementPDF(agreementId: string): Promise<string> {
+    const token = await this.ensurePublicPdfToken(agreementId);
+    const { buildPublicAgreementPdfUrl } = await import("./AgreementPdfService");
+    return buildPublicAgreementPdfUrl(token);
   }
 
   /**
@@ -1845,6 +1888,8 @@ Generated on ${new Date().toLocaleDateString('en-US', {
       if (user.email && notification.type === "created") {
         try {
           const { emailNotificationService } = await import("./EmailNotificationService");
+          const publicPdfToken = await this.ensurePublicPdfToken(agreement._id.toString());
+          const { buildPublicAgreementPdfUrl } = await import("./AgreementPdfService");
           await emailNotificationService.sendAgreementCreated({
             recipientEmail: user.email,
             recipientName: `${user.firstName} ${user.lastName}`,
@@ -1857,6 +1902,7 @@ Generated on ${new Date().toLocaleDateString('en-US', {
             startDate: agreement.startDate,
             endDate: agreement.endDate,
             rentAmount: agreement.rentAmount,
+            pdfDownloadUrl: buildPublicAgreementPdfUrl(publicPdfToken),
           });
         } catch (emailError: any) {
           console.error(

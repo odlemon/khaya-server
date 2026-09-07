@@ -42,8 +42,10 @@ export class ChatController {
     try {
       const userId = (req as any).user._id;
       const userRole = (req as any).user.role;
+      const statusParam = String(req.query.status || "active").toLowerCase();
+      const status = statusParam === "archived" ? "archived" : "active";
 
-      const chats = await chatService.getUserChats(userId, userRole);
+      const chats = await chatService.getUserChats(userId, userRole, status);
 
       res.status(200).json({
         success: true,

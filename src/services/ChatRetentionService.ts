@@ -1,45 +1,52 @@
 // @ts-nocheck
 import { Types } from "mongoose";
-import { Chat, Message, CHAT_INACTIVITY_TTL_SECONDS } from "../models/Chat";
+import { Chat, Message, CHAT_INACTIVITY_ARCHIVE_SECONDS } from "../models/Chat";
 import { Notification } from "../models/Notification";
 import { logger } from "../utils/logger";
 
 const LOG = (msg: string, ...args: unknown[]) => logger.info(`[ChatRetention] ${msg}`, ...args);
 
 export function getInactivitySeconds(): number {
-  return CHAT_INACTIVITY_TTL_SECONDS;
+  return CHAT_INACTIVITY_ARCHIVE_SECONDS;
 }
 
 /**
- * Ensure MongoDB TTL index matches the hardcoded 5-day retention (e.g. after a test run left 10s).
+ * Remove MongoDB TTL auto-delete index if present (chats are soft-archived, not deleted).
  * Called on server startup before accepting traffic.
  */
 export async function ensureChatRetentionTtlIndex(): Promise<void> {
-  const seconds = getInactivitySeconds();
   const collection = Chat.collection;
   const indexes = await collection.indexes();
-  const ttlIndex = indexes.find((i) => i.key?.lastActivityAt === 1);
-  const current = ttlIndex?.expireAfterSeconds as number | undefined;
-
-  if (current === seconds) {
-    LOG(`TTL index OK: ${seconds}s (${Math.round(seconds / 86400)} days)`);
-    return;
-  }
+  const ttlIndex = indexes.find(
+    (i) => i.key?.lastActivityAt === 1 && i.expireAfterSeconds != null
+  );
 
   if (ttlIndex?.name) {
     await collection.dropIndex(ttlIndex.name);
+    LOG(`Dropped TTL delete index: ${ttlIndex.name}`);
   }
-  await collection.createIndex({ lastActivityAt: 1 }, { expireAfterSeconds: seconds });
+
+  const hasPlainIndex = indexes.some(
+    (i) => i.key?.lastActivityAt === 1 && i.expireAfterSeconds == null
+  );
+  if (!hasPlainIndex) {
+    await collection.createIndex({ lastActivityAt: 1 });
+    LOG("Created lastActivityAt index (non-TTL)");
+  }
+
   LOG(
-    `TTL index updated: ${current ?? "none"}s → ${seconds}s (${Math.round(seconds / 86400)} days)`
+    `Chat retention: soft-archive after ${Math.round(getInactivitySeconds() / 86400)} days of inactivity (no TTL delete)`
   );
 }
 
-export interface PurgeInactiveChatsOptions {
+export interface ArchiveInactiveChatsOptions {
   inactivitySeconds?: number;
-  /** When true, only delete chats tagged metadata.retentionTestDummy */
+  /** When true, only archive chats tagged metadata.retentionTestDummy */
   onlyTestDummies?: boolean;
 }
+
+/** @deprecated Renamed — use archiveInactiveChats */
+export type PurgeInactiveChatsOptions = ArchiveInactiveChatsOptions;
 
 /**
  * Delete in-app notifications tied to the given chat IDs.
@@ -109,16 +116,19 @@ export async function deleteNotificationsForMessageIds(
 }
 
 /**
- * Delete chats (and their messages + related notifications) inactive longer than the threshold.
- * Used by lazy cleanup on chat list load and by the retention simulation script.
+ * Archive chats inactive longer than the threshold (keep messages).
+ * Skips chats with keepAlive=true (e.g. active rental).
  */
-export async function purgeInactiveChats(
-  options: PurgeInactiveChatsOptions = {}
-): Promise<{ chatsDeleted: number; messagesDeleted: number; notificationsDeleted: number }> {
+export async function archiveInactiveChats(
+  options: ArchiveInactiveChatsOptions = {}
+): Promise<{ chatsArchived: number }> {
   const inactivitySeconds = options.inactivitySeconds ?? getInactivitySeconds();
   const cutoff = new Date(Date.now() - inactivitySeconds * 1000);
+  const now = new Date();
 
   const filter: Record<string, unknown> = {
+    isActive: true,
+    keepAlive: { $ne: true },
     $or: [
       { lastActivityAt: { $lt: cutoff } },
       {
@@ -132,31 +142,34 @@ export async function purgeInactiveChats(
     filter["metadata.retentionTestDummy"] = true;
   }
 
-  const staleChats = await Chat.find(filter).select("_id").lean();
-  const chatIds = staleChats.map((c) => c._id);
+  const result = await Chat.updateMany(filter, {
+    $set: { isActive: false, archivedAt: now },
+  });
 
-  if (chatIds.length === 0) {
-    return { chatsDeleted: 0, messagesDeleted: 0, notificationsDeleted: 0 };
+  const chatsArchived = result.modifiedCount ?? 0;
+  if (chatsArchived > 0) {
+    LOG(
+      `Archived ${chatsArchived} chat(s) inactive since before ${cutoff.toISOString()}`
+    );
   }
 
-  const messageResult = await Message.deleteMany({ chatId: { $in: chatIds } });
-  const notificationsDeleted = await deleteNotificationsForChatIds(chatIds);
-  const chatResult = await Chat.deleteMany({ _id: { $in: chatIds } });
+  return { chatsArchived };
+}
 
-  LOG(
-    `Purged ${chatResult.deletedCount} chat(s), ${messageResult.deletedCount} message(s), ${notificationsDeleted} notification(s) (cutoff=${cutoff.toISOString()})`
-  );
-
+/** @deprecated Use archiveInactiveChats — kept for callers during migration */
+export async function purgeInactiveChats(
+  options: ArchiveInactiveChatsOptions = {}
+): Promise<{ chatsDeleted: number; messagesDeleted: number; notificationsDeleted: number }> {
+  const { chatsArchived } = await archiveInactiveChats(options);
   return {
-    chatsDeleted: chatResult.deletedCount ?? 0,
-    messagesDeleted: messageResult.deletedCount ?? 0,
-    notificationsDeleted,
+    chatsDeleted: chatsArchived,
+    messagesDeleted: 0,
+    notificationsDeleted: 0,
   };
 }
 
 /**
- * Remove messages whose chat was deleted (e.g. by MongoDB TTL on standalone — no change streams).
- * Also removes notifications for those orphaned messages / missing chats.
+ * Remove messages whose chat was deleted (manual admin delete, etc.).
  */
 export async function purgeOrphanMessages(): Promise<number> {
   const orphanIds = await Message.aggregate([
@@ -195,8 +208,7 @@ export async function purgeOrphanMessages(): Promise<number> {
 }
 
 /**
- * Remove notifications whose chatId / messageId no longer exists
- * (e.g. chats deleted by TTL before notification cascade existed).
+ * Remove notifications whose chatId / messageId no longer exists.
  */
 export async function purgeOrphanChatNotifications(): Promise<{
   byMissingChat: number;

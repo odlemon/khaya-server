@@ -21,6 +21,7 @@ export type NotificationType =
   | "agreement_signed"
   | "agreement_completed"
   | "payment_received"
+  | "rent_due"
   | "maintenance_request"
   | "maintenance_update"
   | "document_verification_submitted"
@@ -79,6 +80,7 @@ const notificationSchema = new Schema<INotification>(
         "agreement_signed",
         "agreement_completed",
         "payment_received",
+        "rent_due",
         "maintenance_request",
         "maintenance_update",
         "document_verification_submitted",

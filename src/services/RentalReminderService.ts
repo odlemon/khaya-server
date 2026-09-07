@@ -6,6 +6,7 @@ import { Property } from "../models/Property";
 import { User } from "../models/User";
 import { Invoice } from "../models/Invoice";
 import { emailNotificationService } from "./EmailNotificationService";
+import { appNotificationService } from "./AppNotificationService";
 import { invoiceService } from "./InvoiceService";
 import { Types } from "mongoose";
 import { logger } from "../utils/logger";
@@ -187,9 +188,9 @@ export class RentalReminderService {
             // Use existing invoice for subsequent reminders
             invoiceId = existingInvoice._id;
             logger.info(`   📄 Using existing invoice: ${existingInvoice.invoiceNumber} (ID: ${invoiceId})`);
-          } else if (reminderType === "7_days") {
-            // If this is the first reminder (7_days), create invoice
-            logger.info(`   📄 Creating invoice for payment ${payment._id} (first reminder)`);
+          } else if (reminderType === "due_date") {
+            // Create invoice on due-date reminder if none exists
+            logger.info(`   📄 Creating invoice for payment ${payment._id} (due-date reminder)`);
             logger.info(`   📄 Payment tenantId: ${payment.tenantId} (type: ${typeof payment.tenantId})`);
             logger.info(`   📄 Payment tenantId string: ${payment.tenantId?.toString() || 'MISSING'}`);
             try {
@@ -230,6 +231,9 @@ export class RentalReminderService {
             logger.info(`   📧 Sending ${reminderType} reminder email...`);
             await this.sendReminderEmail(payment, reminderType, daysUntilDue);
             logger.info(`   ✅ Email sent successfully`);
+
+            await this.sendReminderAppNotification(payment, daysUntilDue);
+            logger.info(`   ✅ In-app/push notification sent`);
             
             // Create reminder record with invoice ID
             logger.info(`   💾 Creating reminder record...`);
@@ -297,7 +301,7 @@ export class RentalReminderService {
    */
   private async sendReminderEmail(
     payment: any,
-    reminderType: "7_days" | "3_days" | "1_day",
+    reminderType: "7_days" | "3_days" | "1_day" | "due_date",
     daysUntilDue: number
   ): Promise<void> {
     const tenant = payment.tenantId;
@@ -320,6 +324,45 @@ export class RentalReminderService {
       dueDate: payment.dueDate,
       daysUntilDue,
       reminderType
+    });
+  }
+
+  /**
+   * Send in-app + FCM rent due notification to tenant.
+   */
+  private async sendReminderAppNotification(payment: any, daysUntilDue: number): Promise<void> {
+    const tenant = payment.tenantId;
+    const property = payment.propertyId;
+    const tenantId =
+      tenant?._id?.toString?.() || tenant?.toString?.() || String(tenant || "");
+    const rentalId =
+      payment.rentalId?._id?.toString?.() ||
+      payment.rentalId?.toString?.() ||
+      String(payment.rentalId || "");
+
+    if (!tenantId) {
+      throw new Error("Missing tenant for rent due notification");
+    }
+
+    const propertyLabel =
+      property?.title ||
+      (property?.address
+        ? `${property.address.street || ""}, ${property.address.city || ""}`.trim()
+        : "your rental");
+
+    const dueLabel =
+      daysUntilDue === 0 ? "due today" : daysUntilDue === 1 ? "due tomorrow" : `due in ${daysUntilDue} days`;
+
+    await appNotificationService.notify({
+      userId: tenantId,
+      type: "rent_due",
+      title: "Rent payment due",
+      body: `K${Number(payment.amount || 0).toFixed(2)} for ${propertyLabel} is ${dueLabel}.`,
+      data: {
+        rentalId,
+        paymentId: payment._id?.toString?.() || String(payment._id),
+        suppressBanner: false,
+      },
     });
   }
 
@@ -370,40 +413,22 @@ export class RentalReminderService {
   }
 
   /**
-   * Get which reminder types should be sent based on days until due
-   * In test mode: 7 days = 4 minutes, 3 days = ~1.7 minutes, 1 day = ~0.57 minutes
+   * Get which reminder types should be sent based on days until due.
+   * One notification on the rent due date only.
    */
-  private getReminderTypesForDays(daysUntilDue: number): Array<"7_days" | "3_days" | "1_day"> {
-    const types: Array<"7_days" | "3_days" | "1_day"> = [];
-
+  private getReminderTypesForDays(daysUntilDue: number): Array<"due_date"> {
     if (TEST_MODE) {
-      // Test mode: 
-      // - 7-day reminder: payment due in ~4 minutes (7 days = 4 minutes)
-      // - 3-day reminder: payment due in ~1.7 minutes (3 days = 1.7 minutes)
-      // - 1-day reminder: payment due in ~0.57 minutes (1 day = 0.57 minutes)
-      // Allow some flexibility for timing (±0.5 minutes)
-      // Also send reminders for overdue payments (negative daysUntilDue)
-      if (daysUntilDue >= 6 && daysUntilDue <= 8) {  // ~4 minutes before (7 days)
-        types.push("7_days");
-      } else if (daysUntilDue >= 1.5 && daysUntilDue <= 2.5) {  // ~1.7 minutes before (3 days)
-        types.push("3_days");
-      } else if (daysUntilDue >= -1 && daysUntilDue <= 1) {  // ~0.57 minutes before/after (1 day) - include overdue
-        types.push("1_day");
-      } else if (daysUntilDue < -1 && daysUntilDue >= -7) {  // Overdue but within 7 days - send 1_day reminder
-        types.push("1_day");
+      if (daysUntilDue >= -1 && daysUntilDue <= 1) {
+        return ["due_date"];
       }
-    } else {
-      // Production mode: exact day matching
-      if (daysUntilDue === 7) {
-        types.push("7_days");
-      } else if (daysUntilDue === 3) {
-        types.push("3_days");
-      } else if (daysUntilDue === 1) {
-        types.push("1_day");
-      }
+      return [];
     }
 
-    return types;
+    if (daysUntilDue === 0) {
+      return ["due_date"];
+    }
+
+    return [];
   }
 
   /**
@@ -460,7 +485,7 @@ export class RentalReminderService {
         const sentReminders = reminderMap.get(payment._id.toString()) || [];
         
         // Get invoice ID from first reminder (7_days) if exists
-        const firstReminder = sentReminders.find(r => r.type === "7_days");
+        const firstReminder = sentReminders.find((r) => r.type === "due_date");
         const invoiceId = firstReminder?.invoiceId || null;
         const invoiceNumber = firstReminder?.invoiceNumber || null;
 
@@ -492,26 +517,12 @@ export class RentalReminderService {
   private getUpcomingReminderTypes(
     daysUntilDue: number,
     sentReminders: Array<{ type: string }>
-  ): Array<"7_days" | "3_days" | "1_day"> {
-    const allTypes: Array<"7_days" | "3_days" | "1_day"> = ["7_days", "3_days", "1_day"];
-    const sentTypes = sentReminders.map(r => r.type);
-    
-    const upcoming: Array<"7_days" | "3_days" | "1_day"> = [];
-    
-    if (daysUntilDue > 7 && !sentTypes.includes("7_days")) {
-      upcoming.push("7_days");
+  ): Array<"due_date"> {
+    const sentTypes = sentReminders.map((r) => r.type);
+    if (daysUntilDue === 0 && !sentTypes.includes("due_date")) {
+      return ["due_date"];
     }
-    if (daysUntilDue > 3 && daysUntilDue <= 7 && !sentTypes.includes("3_days")) {
-      upcoming.push("3_days");
-    }
-    if (daysUntilDue > 1 && daysUntilDue <= 3 && !sentTypes.includes("1_day")) {
-      upcoming.push("1_day");
-    }
-    if (daysUntilDue === 1 && !sentTypes.includes("1_day")) {
-      upcoming.push("1_day");
-    }
-    
-    return upcoming;
+    return [];
   }
 }
 

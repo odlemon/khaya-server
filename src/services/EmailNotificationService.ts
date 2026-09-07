@@ -433,6 +433,7 @@ export class EmailNotificationService {
     startDate: Date;
     endDate: Date;
     rentAmount: number;
+    pdfDownloadUrl: string;
   }): Promise<void> {
     const subject = "New Rental Agreement Created - Khayalami";
     const htmlContent = this.getAgreementCreatedTemplate(data);
@@ -461,6 +462,7 @@ export class EmailNotificationService {
     startDate: Date;
     endDate: Date;
     rentAmount: number;
+    pdfDownloadUrl: string;
   }): string {
     const startDate = new Date(data.startDate).toLocaleDateString('en-US', {
       year: 'numeric',
@@ -479,7 +481,7 @@ export class EmailNotificationService {
 
     const roleMessage = data.recipientRole === "landlord" 
       ? `A new rental agreement has been created for your property. Please review and sign the agreement.`
-      : `A new rental agreement has been created for you. Please review the terms and sign when you are ready. The one-time agreement processing fee will be included in your first rent payment.`;
+      : `A new rental agreement has been created for you. Please review the terms and pay the one-time agreement processing fee, which unlocks signing once your landlord has signed.`;
 
     return `
       <!DOCTYPE html>
@@ -545,8 +547,8 @@ export class EmailNotificationService {
             </div>
 
             <p style="text-align: center;">
-              <a href="${process.env.FRONTEND_URL || 'https://khayalami.com'}/agreements/${data.agreementId}" class="button">
-                View Agreement
+              <a href="${data.pdfDownloadUrl}" class="button">
+                Download Agreement (PDF)
               </a>
             </p>
 
@@ -663,7 +665,7 @@ export class EmailNotificationService {
     rentAmount: number;
     dueDate: Date;
     daysUntilDue: number;
-    reminderType: "7_days" | "3_days" | "1_day";
+    reminderType: "7_days" | "3_days" | "1_day" | "due_date";
   }): Promise<void> {
     const subject = this.getRentReminderSubject(data.daysUntilDue, data.reminderType);
     const htmlContent = this.getRentReminderTemplate(data);
@@ -680,7 +682,10 @@ export class EmailNotificationService {
   /**
    * Get rent reminder email subject based on days until due
    */
-  private getRentReminderSubject(daysUntilDue: number, reminderType: "7_days" | "3_days" | "1_day"): string {
+  private getRentReminderSubject(daysUntilDue: number, reminderType: "7_days" | "3_days" | "1_day" | "due_date"): string {
+    if (reminderType === "due_date" || daysUntilDue === 0) {
+      return "⏰ Rent Payment Due Today - Khayalami";
+    }
     if (daysUntilDue === 1) {
       return "⏰ Reminder: Rent Payment Due Tomorrow - Khayalami";
     } else if (daysUntilDue === 3) {
@@ -699,7 +704,7 @@ export class EmailNotificationService {
     rentAmount: number;
     dueDate: Date;
     daysUntilDue: number;
-    reminderType: "7_days" | "3_days" | "1_day";
+    reminderType: "7_days" | "3_days" | "1_day" | "due_date";
   }): string {
     const dueDateFormatted = new Date(data.dueDate).toLocaleDateString("en-US", {
       weekday: "long",
@@ -708,8 +713,11 @@ export class EmailNotificationService {
       day: "numeric"
     });
 
-    const urgencyColor = data.daysUntilDue === 1 ? "#dc3545" : data.daysUntilDue === 3 ? "#ffc107" : "#17a2b8";
-    const urgencyMessage = data.daysUntilDue === 1 
+    const isDueToday = data.reminderType === "due_date" || data.daysUntilDue === 0;
+    const urgencyColor = isDueToday ? "#dc3545" : data.daysUntilDue === 1 ? "#dc3545" : data.daysUntilDue === 3 ? "#ffc107" : "#17a2b8";
+    const urgencyMessage = isDueToday
+      ? "⚠️ Your rent payment is due TODAY!"
+      : data.daysUntilDue === 1 
       ? "⚠️ Payment is due TOMORROW!" 
       : data.daysUntilDue === 3 
       ? "⏰ Payment due in 3 days" 

@@ -11,7 +11,7 @@ import {
   isMessageReadByUser,
   unreadMessagesFilterForUser,
 } from "../utils/messageReadStatus";
-import { purgeInactiveChats, purgeOrphanMessages, purgeOrphanChatNotifications } from "./ChatRetentionService";
+import { archiveInactiveChats, purgeOrphanMessages, purgeOrphanChatNotifications } from "./ChatRetentionService";
 
 export interface CreateMessageData {
   chatId: string;
@@ -105,14 +105,19 @@ export class ChatService {
       throw new Error("Connection not established. Please send a connection request first.");
     }
 
-    // Check if chat already exists
+    // Reuse existing chat (including archived) for same tenant + landlord + property
     let chat = await Chat.findOne({
       participants: { $all: [tenantIdStr, landlordIdStr] },
       propertyId: propertyIdStr,
-      isActive: true
     })
     .populate("participants", "firstName lastName email role profile.avatar")
     .populate("propertyId", "title address price serviceFeePayer images propertyType status bedrooms bathrooms landlordId");
+
+    if (chat && !chat.isActive) {
+      chat.isActive = true;
+      chat.archivedAt = undefined;
+      await chat.save();
+    }
 
     if (!chat) {
       // Create new chat
@@ -140,9 +145,9 @@ export class ChatService {
    * Get user's chats (both as tenant and landlord)
    * Handles old chats without propertyId by attempting to link them via Connections
    */
-  async getUserChats(userId: string, userRole: string): Promise<any[]> {
-    purgeInactiveChats().catch((err) => {
-      console.error("Background chat retention purge failed:", err.message || err);
+  async getUserChats(userId: string, userRole: string, status: "active" | "archived" = "active"): Promise<any[]> {
+    archiveInactiveChats().catch((err) => {
+      console.error("Background chat archive job failed:", err.message || err);
     });
     purgeOrphanMessages().catch((err) => {
       console.error("Background orphan message purge failed:", err.message || err);
@@ -151,9 +156,11 @@ export class ChatService {
       console.error("Background orphan chat notification purge failed:", err.message || err);
     });
 
+    const isArchived = status === "archived";
+
     const chats = await Chat.find({
       participants: userId,
-      isActive: true
+      isActive: !isArchived
     })
     .populate("participants", "firstName lastName email role profile.avatar")
     .populate("propertyId", "title address price serviceFeePayer images propertyType status bedrooms bathrooms landlordId")
@@ -231,6 +238,12 @@ export class ChatService {
         chatId
       });
       throw new Error("Access denied");
+    }
+
+    // Unarchive on new message
+    if (!chat.isActive) {
+      chat.isActive = true;
+      chat.archivedAt = undefined;
     }
 
     // Parse message for @mentions (any user can tag)
@@ -651,6 +664,7 @@ export class ChatService {
     }
 
     chat.isActive = false;
+    chat.archivedAt = new Date();
     await chat.save();
   }
 
