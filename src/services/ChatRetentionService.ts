@@ -16,7 +16,22 @@ export function getInactivitySeconds(): number {
  */
 export async function ensureChatRetentionTtlIndex(): Promise<void> {
   const collection = Chat.collection;
-  const indexes = await collection.indexes();
+
+  // On a fresh database the `chats` collection does not exist yet, and
+  // indexes() rejects with "ns does not exist" instead of returning an empty
+  // list. That used to escape and abort server startup, so a clean install
+  // could never boot. Create the collection and carry on.
+  let indexes;
+  try {
+    indexes = await collection.indexes();
+  } catch (err: any) {
+    const missingNamespace =
+      err?.codeName === "NamespaceNotFound" || /ns does not exist/i.test(err?.message ?? "");
+    if (!missingNamespace) throw err;
+    await Chat.createCollection();
+    indexes = await collection.indexes();
+  }
+
   const ttlIndex = indexes.find(
     (i) => i.key?.lastActivityAt === 1 && i.expireAfterSeconds != null
   );
