@@ -1,6 +1,6 @@
 // @ts-nocheck
 import { Rental, IRental } from "../models/Rental";
-import { ConditionLog } from "../models/ConditionLog";
+import { ConditionLog, MAX_CONDITION_LOG_PHOTOS } from "../models/ConditionLog";
 import { Payment } from "../models/Payment";
 import { Agreement } from "../models/Agreement";
 import { Property } from "../models/Property";
@@ -512,8 +512,8 @@ export class RentalService {
     assertRentalAcceptsNewBookings(rental);
 
     // Validate photo count
-    if (data.photoUrls && data.photoUrls.length > 3) {
-      throw new Error("Maximum 3 photos allowed");
+    if (data.photoUrls && data.photoUrls.length > MAX_CONDITION_LOG_PHOTOS) {
+      throw new Error(`Maximum ${MAX_CONDITION_LOG_PHOTOS} photos allowed`);
     }
 
     // Create log
@@ -583,8 +583,8 @@ export class RentalService {
     }
 
     // Validate photo count
-    if (data.photoUrls && data.photoUrls.length > 3) {
-      throw new Error("Maximum 3 photos allowed");
+    if (data.photoUrls && data.photoUrls.length > MAX_CONDITION_LOG_PHOTOS) {
+      throw new Error(`Maximum ${MAX_CONDITION_LOG_PHOTOS} photos allowed`);
     }
 
     // Update fields

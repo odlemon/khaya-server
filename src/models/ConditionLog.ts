@@ -1,6 +1,13 @@
 // @ts-nocheck
 import mongoose, { Document, Schema, Model } from "mongoose";
 
+/**
+ * How many photos may accompany one condition log. Exported so the service
+ * layer and any client-facing copy read the same number — it was previously
+ * hardcoded as 3 in four separate places.
+ */
+export const MAX_CONDITION_LOG_PHOTOS = 12;
+
 export interface IConditionLog extends Document {
   rentalId: mongoose.Types.ObjectId;
   agreementId: mongoose.Types.ObjectId;
@@ -51,13 +58,13 @@ const conditionLogSchema = new Schema<IConditionLog>({
   customLabel: { type: String },
   
   videoUrl: { type: String, required: true },
-  photoUrls: { 
+  photoUrls: {
     type: [{ type: String }],
     validate: {
       validator: function(v: string[]) {
-        return v.length <= 3;
+        return v.length <= MAX_CONDITION_LOG_PHOTOS;
       },
-      message: 'Maximum 3 photos allowed'
+      message: `Maximum ${MAX_CONDITION_LOG_PHOTOS} photos allowed`
     }
   },
   notes: { type: String },
