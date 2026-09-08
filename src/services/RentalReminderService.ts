@@ -12,6 +12,21 @@ import { Types } from "mongoose";
 import { logger } from "../utils/logger";
 import { TEST_MODE, daysToMinutes, addDays, addMonths } from "../config/testMode";
 
+export type RentReminderType = "7_days" | "3_days" | "1_day" | "due_date";
+
+/**
+ * When each rent reminder fires, in days before the due date. Kept in due-date
+ * order so "what is still coming" reads off it directly. These values must stay
+ * in step with the reminderType enum on the RentalReminder model, which is what
+ * makes each reminder send at most once per payment.
+ */
+const REMINDER_SCHEDULE: Array<{ type: RentReminderType; day: number }> = [
+  { type: "7_days", day: 7 },
+  { type: "3_days", day: 3 },
+  { type: "1_day", day: 1 },
+  { type: "due_date", day: 0 },
+];
+
 export class RentalReminderService {
   /**
    * Check for upcoming payments and send reminders
@@ -301,7 +316,7 @@ export class RentalReminderService {
    */
   private async sendReminderEmail(
     payment: any,
-    reminderType: "7_days" | "3_days" | "1_day" | "due_date",
+    reminderType: RentReminderType,
     daysUntilDue: number
   ): Promise<void> {
     const tenant = payment.tenantId;
@@ -414,19 +429,29 @@ export class RentalReminderService {
 
   /**
    * Get which reminder types should be sent based on days until due.
-   * One notification on the rent due date only.
+   *
+   * Tenants are warned ahead of the due date — a week out, then three days,
+   * then the day before — and finally on the day itself. Only the due-date
+   * reminder raises an invoice; the earlier ones are warnings, so a tenant who
+   * pays early never sees the later ones fire (the payment stops being pending
+   * and drops out of the scan).
    */
-  private getReminderTypesForDays(daysUntilDue: number): Array<"due_date"> {
+  private getReminderTypesForDays(daysUntilDue: number): RentReminderType[] {
     if (TEST_MODE) {
+      // Unchanged: the compressed test clock is imprecise, so the due-date
+      // window stays a range and claims anything within a day either side.
       if (daysUntilDue >= -1 && daysUntilDue <= 1) {
         return ["due_date"];
       }
+      if (daysUntilDue === 7) return ["7_days"];
+      if (daysUntilDue === 3) return ["3_days"];
       return [];
     }
 
-    if (daysUntilDue === 0) {
-      return ["due_date"];
-    }
+    if (daysUntilDue === 7) return ["7_days"];
+    if (daysUntilDue === 3) return ["3_days"];
+    if (daysUntilDue === 1) return ["1_day"];
+    if (daysUntilDue === 0) return ["due_date"];
 
     return [];
   }
@@ -484,7 +509,8 @@ export class RentalReminderService {
         const daysUntilDue = this.calculateDaysUntilDue(payment.dueDate);
         const sentReminders = reminderMap.get(payment._id.toString()) || [];
         
-        // Get invoice ID from first reminder (7_days) if exists
+        // The invoice is raised by the due-date reminder, so that is the one
+        // carrying the invoice reference — the earlier warnings do not.
         const firstReminder = sentReminders.find((r) => r.type === "due_date");
         const invoiceId = firstReminder?.invoiceId || null;
         const invoiceNumber = firstReminder?.invoiceNumber || null;
@@ -517,12 +543,11 @@ export class RentalReminderService {
   private getUpcomingReminderTypes(
     daysUntilDue: number,
     sentReminders: Array<{ type: string }>
-  ): Array<"due_date"> {
+  ): RentReminderType[] {
     const sentTypes = sentReminders.map((r) => r.type);
-    if (daysUntilDue === 0 && !sentTypes.includes("due_date")) {
-      return ["due_date"];
-    }
-    return [];
+    return REMINDER_SCHEDULE
+      .filter(({ type, day }) => daysUntilDue >= day && !sentTypes.includes(type))
+      .map(({ type }) => type);
   }
 }
 
