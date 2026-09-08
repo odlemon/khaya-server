@@ -41,6 +41,31 @@ curl "https://khayamanage.co.zw/socket.io/?EIO=4&transport=polling"
 
 If the portal nginx already proxies to `:4002`, you usually **do not** need this on the backend host.
 
+### Required backend `.env` for emailed links
+
+```env
+BACKEND_URL=https://khayamanage.co.zw/api/backend
+```
+
+Links that are emailed to people are built from `BACKEND_URL` (falling back to
+`API_PUBLIC_URL`, then `API_URL`) — most visibly the **Download Agreement (PDF)**
+button in the agreement email. With none of them set the code falls back to
+`http://localhost:4002`, so recipients get a link that is dead for everyone but
+the server itself.
+
+The `/api/backend` suffix is **required**, not optional. The portal nginx proxies
+`/api/backend/` to the backend root, so:
+
+| `BACKEND_URL` | Emailed link resolves to | Result |
+|---|---|---|
+| unset | `http://localhost:4002/api/agreements/public/…` | dead for recipients |
+| `https://khayamanage.co.zw` | `/api/agreements/public/…` | 404 at the portal |
+| `https://khayamanage.co.zw/api/backend` | `/api/backend/api/agreements/public/…` | ✅ correct |
+
+The endpoint itself already responds with `Content-Type: application/pdf` and
+`Content-Disposition: attachment`, so the link downloads a file rather than
+opening a viewer, and it is token-authenticated so recipients need no login.
+
 ## What is NOT in this repo
 
 - Nginx cannot be changed by backend Node code — it is a separate web server in front of Node.

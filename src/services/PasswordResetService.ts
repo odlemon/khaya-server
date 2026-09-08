@@ -3,13 +3,16 @@ import crypto from "crypto";
 import { User } from "../models/User";
 import { PasswordResetToken } from "../models/PasswordResetToken";
 import { emailTransport, getFromAddress } from "../config/emailConfig";
+import { getPublicApiBaseUrl } from "../utils/publicUrl";
 
 const TOKEN_BYTES = 32;
 const EXPIRY_MS = 60 * 60 * 1000; // 1 hour
 
 /**
- * App-only password reset deep link (Capacitor / Android intent).
- * Hardcoded so reset emails never use a legacy web domain.
+ * App deep link (Capacitor / Android intent). Kept as a secondary option only.
+ * It cannot be the link in the email: mail clients do not turn custom URI
+ * schemes into hyperlinks and many strip the href outright, which is why the
+ * reset link was not clickable at all.
  * Change here + native app intent filters if this URI ever changes.
  */
 const PASSWORD_RESET_APP_DEEP_LINK_BASE = "khayalami://reset-password";
@@ -18,7 +21,13 @@ function hashToken(token: string): string {
   return crypto.createHash("sha256").update(token, "utf8").digest("hex");
 }
 
+/** https link to the server-rendered reset form — what the email points at. */
 function resetLink(plainToken: string): string {
+  return `${getPublicApiBaseUrl()}/api/auth/reset-password?token=${encodeURIComponent(plainToken)}`;
+}
+
+/** Deep link for people who already have the app installed. */
+function resetAppLink(plainToken: string): string {
   const trimmed = PASSWORD_RESET_APP_DEEP_LINK_BASE.replace(/\/$/, "");
   const sep = trimmed.includes("?") ? "&" : "?";
   return `${trimmed}${sep}token=${encodeURIComponent(plainToken)}`;
@@ -60,29 +69,35 @@ export class PasswordResetService {
 
     const from = getFromAddress("security");
     const link = resetLink(plainToken);
+    const appLink = resetAppLink(plainToken);
     const toName = `${user.firstName || ""} ${user.lastName || ""}`.trim();
 
     // Table-based "bulletproof" CTA: many clients strip background on <a> or ignore display:inline-block;
     // bgcolor on <td> + block <a> improves tap targets (Gmail, Outlook, Apple Mail). No target="_blank"
     // (can break custom-scheme links in webmail). Plain-text part gives a fallback when HTML is stripped.
     const intro = `
-<p style="margin:0 0 16px;font-size:15px;line-height:1.5;">Open the <strong>Khayalami</strong> app to set a new password. This link is valid for <strong>1 hour</strong>.</p>
+<p style="margin:0 0 16px;font-size:15px;line-height:1.5;">Click the button below to set a new password. This link is valid for <strong>1 hour</strong>.</p>
 <table role="presentation" cellspacing="0" cellpadding="0" border="0" align="center" style="margin:0 auto 20px auto;">
   <tr>
-    <td align="center" bgcolor="#4f46e5" style="border-radius:8px;background-color:#4f46e5;">
-      <a href="${link}" style="display:block;padding:16px 32px;font-family:Arial,Helvetica,sans-serif;font-size:17px;font-weight:bold;color:#ffffff;text-decoration:none;text-align:center;line-height:1.35;border-radius:8px;mso-line-height-rule:exactly;">Open in app</a>
+    <td align="center" bgcolor="#1C7E83" style="border-radius:8px;background-color:#1C7E83;">
+      <a href="${link}" style="display:block;padding:16px 32px;font-family:Arial,Helvetica,sans-serif;font-size:17px;font-weight:bold;color:#ffffff;text-decoration:none;text-align:center;line-height:1.35;border-radius:8px;mso-line-height-rule:exactly;">Reset my password</a>
     </td>
   </tr>
 </table>
-<p style="margin:0 0 8px;font-size:14px;color:#555;line-height:1.5;">If the button does not respond, tap this link on your phone:</p>
-<p style="word-break:break-all;font-size:14px;line-height:1.45;margin:0;"><a href="${link}" style="color:#1d4ed8;text-decoration:underline;">${link}</a></p>`;
+<p style="margin:0 0 8px;font-size:14px;color:#555;line-height:1.5;">If the button does not work, copy this link into your browser:</p>
+<p style="word-break:break-all;font-size:14px;line-height:1.45;margin:0 0 16px;"><a href="${link}" style="color:#1d4ed8;text-decoration:underline;">${link}</a></p>
+<p style="margin:0;font-size:13px;color:#777;line-height:1.5;">Already have the Khayalami app installed? You can <a href="${appLink}" style="color:#1d4ed8;">open it there</a> instead.</p>`;
 
     const greeting = user.firstName ? `Hello ${user.firstName},` : "Hello,";
     const textBody = `${greeting}
 
-Reset your Khayalami password by opening this link on your phone (valid 1 hour):
+Reset your Khayalami password by opening this link (valid 1 hour):
 
 ${link}
+
+If you have the Khayalami app installed, you can open it there instead:
+
+${appLink}
 
 If you did not request this, you can ignore this email.
 
@@ -104,6 +119,12 @@ If you did not request this, you can ignore this email.
         </body></html>
       `,
     });
+
+    // Mirrors the verification-email PIN log: outside production the address is
+    // usually unreachable, so surface the link to make the flow testable.
+    if (process.env.NODE_ENV !== "production") {
+      console.log(`✅ Password reset email sent to ${user.email} with link: ${link}`);
+    }
 
     return { sent: true };
   }

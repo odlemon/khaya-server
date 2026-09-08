@@ -21,11 +21,13 @@ export type NotificationType =
   | "agreement_signed"
   | "agreement_completed"
   | "payment_received"
+  | "rent_due"
   | "maintenance_request"
   | "maintenance_update"
   | "document_verification_submitted"
   | "document_verification_approved"
-  | "document_verification_rejected";
+  | "document_verification_rejected"
+  | "condition_log_due";
 
 export interface INotificationData {
   chatId?: string;
@@ -79,11 +81,13 @@ const notificationSchema = new Schema<INotification>(
         "agreement_signed",
         "agreement_completed",
         "payment_received",
+        "rent_due",
         "maintenance_request",
         "maintenance_update",
         "document_verification_submitted",
         "document_verification_approved",
         "document_verification_rejected",
+        "condition_log_due",
       ],
       required: true,
     },

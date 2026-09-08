@@ -6,7 +6,7 @@ export interface IRentalReminder extends Document {
   tenantId: mongoose.Types.ObjectId;
   paymentId: mongoose.Types.ObjectId;
   invoiceId?: mongoose.Types.ObjectId; // Link to invoice (created on first reminder)
-  reminderType: "7_days" | "3_days" | "1_day";
+  reminderType: "7_days" | "3_days" | "1_day" | "due_date";
   dueDate: Date;
   sentAt: Date;
   status: "pending" | "sent" | "dismissed";
@@ -38,7 +38,7 @@ const rentalReminderSchema = new Schema<IRentalReminder>(
     },
     reminderType: {
       type: String,
-      enum: ["7_days", "3_days", "1_day"],
+      enum: ["7_days", "3_days", "1_day", "due_date"],
       required: true
     },
     dueDate: {

@@ -14,6 +14,9 @@ const router = Router();
 router.post("/register", authController.register.bind(authController));
 router.post("/login", authController.login.bind(authController));
 router.post("/forgot-password", authController.forgotPassword.bind(authController));
+// GET serves the reset form that the emailed link opens; POST accepts both that
+// form (responding with HTML) and the app's JSON call.
+router.get("/reset-password", authController.resetPasswordPage.bind(authController));
 router.post("/reset-password", authController.resetPassword.bind(authController));
 router.post("/change-password", authenticate, authController.changePassword.bind(authController));
 router.post("/verify-2fa", authController.verify2FALogin.bind(authController));

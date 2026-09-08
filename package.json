@@ -54,6 +54,7 @@
     "passport": "^0.7.0",
     "passport-google-oauth20": "^2.0.0",
     "paynow": "^2.2.2",
+    "pdf-lib": "^1.17.1",
     "socket.io": "^4.8.1",
     "zeptomail": "^6.2.1"
   },

@@ -7,7 +7,13 @@ import { requirePermission } from "../middleware/permissions";
 
 const router = express.Router();
 
-// All agreement routes require authentication
+// Public agreement PDF download (tokenized — no login)
+router.get(
+  "/public/:token/pdf",
+  (req, res, next) => agreementController.downloadPublicAgreementPdf(req, res, next)
+);
+
+// All other agreement routes require authentication
 router.use(authenticate);
 
 // Get connected landlords and tenants for agreement creation (admin only)

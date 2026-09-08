@@ -15,6 +15,7 @@ import SocketService from "./services/SocketService"
 import { setSocketService } from "./services/realtimeRegistry"
 import { getSocketCorsOrigins } from "./utils/socketCors"
 import { startChatRetentionWatcher, stopChatRetentionWatcher } from "./services/ChatRetentionWatcher"
+import { warnIfPublicBaseUrlUnusable } from "./utils/publicUrl"
 import { ensureChatRetentionTtlIndex } from "./services/ChatRetentionService"
 import { initializeFirebaseAdmin, isFirebaseInitialized, isFcmEnabled } from "./config/firebaseAdmin"
 
@@ -170,6 +171,7 @@ const startServer = async (): Promise<void> => {
     await ensureChatRetentionTtlIndex()
     initializeFirebaseAdmin()
     startChatRetentionWatcher()
+    warnIfPublicBaseUrlUnusable()
 
     // Find an available port
     const port = await getServerPort()

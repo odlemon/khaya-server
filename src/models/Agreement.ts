@@ -119,6 +119,8 @@ export interface IAgreement extends Document {
   expiredAt?: Date;
   terminatedAt?: Date;
   terminatedBy?: mongoose.Types.ObjectId;
+  /** Unauthenticated token for email PDF download links */
+  publicPdfToken?: string;
 }
 
 const agreementSchema = new Schema<IAgreement>({
@@ -249,7 +251,9 @@ const agreementSchema = new Schema<IAgreement>({
   }],
   witnessName: { type: String },
   witnessSignature: { type: String },
-  witnessId: { type: String }
+  witnessId: { type: String },
+
+  publicPdfToken: { type: String, unique: true, sparse: true, index: true },
 }, { 
   timestamps: true 
 });

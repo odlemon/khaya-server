@@ -5,6 +5,11 @@ import { User } from "../models/User";
 import { EmailVerificationService } from "../services/EmailVerificationService";
 import { TwoFactorAuthService } from "../services/TwoFactorAuthService";
 import { PasswordResetService } from "../services/PasswordResetService";
+import {
+  renderResetForm,
+  renderResetResult,
+  renderMissingToken,
+} from "../utils/passwordResetPage";
 import jwt from "jsonwebtoken";
 import { JWT_SECRET, JWT_EXPIRES_IN } from "../config/jwtConfig";
 import { buildAuthLoginPayload } from "../utils/authLoginPayload";
@@ -398,22 +403,63 @@ export class AuthController {
   /**
    * Complete password reset with token from email (public).
    */
+  /**
+   * Serve the reset form the emailed link opens (public, HTML).
+   */
+  async resetPasswordPage(req: Request, res: Response, next: NextFunction) {
+    try {
+      const token = typeof req.query.token === "string" ? req.query.token.trim() : "";
+      res.type("html");
+      if (!token) {
+        return res.status(400).send(renderMissingToken());
+      }
+      return res.status(200).send(renderResetForm({ token }));
+    } catch (error: any) {
+      next(error);
+    }
+  }
+
   async resetPassword(req: Request, res: Response, next: NextFunction) {
     try {
       const { token, newPassword, confirmPassword } = req.body || {};
+
+      // The emailed page posts a plain form; the app posts JSON. Only the form
+      // gets HTML back, so the existing API contract is unchanged.
+      const wantsHtml = Boolean(req.is("application/x-www-form-urlencoded"));
+      const tokenStr = typeof token === "string" ? token : "";
+
       if (confirmPassword !== undefined && confirmPassword !== newPassword) {
-        return res.status(400).json({ success: false, message: "Passwords do not match." });
+        const message = "Passwords do not match.";
+        if (wantsHtml) {
+          return res.status(400).type("html").send(renderResetForm({ token: tokenStr, error: message }));
+        }
+        return res.status(400).json({ success: false, message });
       }
 
       const result = await PasswordResetService.confirmReset(
-        typeof token === "string" ? token : "",
+        tokenStr,
         typeof newPassword === "string" ? newPassword : ""
       );
 
       if (!result.success) {
+        if (wantsHtml) {
+          // A bad password is worth re-offering the form for; a dead token is not.
+          const recoverable = /at least 8 characters/i.test(result.message);
+          return res
+            .status(400)
+            .type("html")
+            .send(
+              recoverable
+                ? renderResetForm({ token: tokenStr, error: result.message })
+                : renderResetResult({ success: false, message: result.message })
+            );
+        }
         return res.status(400).json({ success: false, message: result.message });
       }
 
+      if (wantsHtml) {
+        return res.status(200).type("html").send(renderResetResult({ success: true, message: result.message }));
+      }
       return res.status(200).json({ success: true, message: result.message });
     } catch (error: any) {
       next(error);

@@ -1,6 +1,6 @@
 // @ts-nocheck
 import { Rental, IRental } from "../models/Rental";
-import { ConditionLog } from "../models/ConditionLog";
+import { ConditionLog, MAX_CONDITION_LOG_PHOTOS } from "../models/ConditionLog";
 import { Payment } from "../models/Payment";
 import { Agreement } from "../models/Agreement";
 import { Property } from "../models/Property";
@@ -12,10 +12,66 @@ import {
   assertRentalAcceptsTenantPayments,
   getRentalCapabilities,
 } from "../utils/rentalCapabilities";
+import {
+  buildQuarterlySchedule,
+  firstOutstandingCheckpoint,
+} from "./ConditionLogScheduleService";
 import { enrichRentalForApi } from "../utils/enrichRentalResponse";
 import { assertTenantHasNoActiveRental } from "../utils/tenantRentalLimits";
+import { Chat } from "../models/Chat";
 
 export class RentalService {
+  /**
+   * Protect landlord–tenant chat from inactivity archive while rental is active.
+   */
+  private async protectChatForActiveRental(
+    tenantId: unknown,
+    landlordId: unknown,
+    propertyId: unknown
+  ): Promise<void> {
+    const tenantIdStr = tenantId?.toString?.() || String(tenantId);
+    const landlordIdStr = landlordId?.toString?.() || String(landlordId);
+    const propertyIdStr = propertyId?.toString?.() || String(propertyId);
+
+    const result = await Chat.updateOne(
+      {
+        participants: { $all: [tenantIdStr, landlordIdStr] },
+        propertyId: propertyIdStr,
+      },
+      {
+        $set: { keepAlive: true, isActive: true },
+        $unset: { archivedAt: "" },
+      }
+    );
+
+    if (result.modifiedCount > 0 || result.matchedCount > 0) {
+      console.log(
+        `💬 Chat keepAlive enabled for rental (tenant=${tenantIdStr}, property=${propertyIdStr})`
+      );
+    }
+  }
+
+  /**
+   * Allow inactivity archive again after rental ends.
+   */
+  private async releaseChatKeepAlive(
+    tenantId: unknown,
+    landlordId: unknown,
+    propertyId: unknown
+  ): Promise<void> {
+    const tenantIdStr = tenantId?.toString?.() || String(tenantId);
+    const landlordIdStr = landlordId?.toString?.() || String(landlordId);
+    const propertyIdStr = propertyId?.toString?.() || String(propertyId);
+
+    await Chat.updateOne(
+      {
+        participants: { $all: [tenantIdStr, landlordIdStr] },
+        propertyId: propertyIdStr,
+      },
+      { $set: { keepAlive: false } }
+    );
+  }
+
   /**
    * Mark property off-market for tenant search.
    */
@@ -80,6 +136,11 @@ export class RentalService {
     if (existingRental) {
       console.log(`✅ Rental already exists for agreement: ${agreementId}`);
       await this.markPropertyAsRented(agreement.propertyId);
+      await this.protectChatForActiveRental(
+        agreement.tenantId,
+        agreement.landlordId,
+        agreement.propertyId
+      );
       return existingRental;
     }
 
@@ -112,6 +173,12 @@ export class RentalService {
     console.log(`📅 Creating payment schedule for rental: ${rental._id}`);
     await this.createPaymentSchedule(rental);
     console.log(`✅ Payment schedule created for rental: ${rental._id}`);
+
+    await this.protectChatForActiveRental(
+      agreement.tenantId,
+      agreement.landlordId,
+      agreement.propertyId
+    );
 
     return rental;
   }
@@ -295,6 +362,9 @@ export class RentalService {
     const conditionLogs = await ConditionLog.find({ rentalId: rental._id })
       .sort({ dueDate: 1 });
 
+    // Quarterly condition-report checkpoints, with the uploaded logs marked off.
+    const conditionSchedule = buildQuarterlySchedule(rental as any, conditionLogs as any[]);
+
     const capabilities = getRentalCapabilities(rental);
     const enrichedRental = await enrichRentalForApi(rental);
 
@@ -336,30 +406,23 @@ export class RentalService {
           dueDate: upcomingPayment.dueDate
         };
       } else {
-        // Check for overdue condition logs
-        const overdueLog = conditionLogs.find(l => l.status === 'pending' && l.dueDate < now);
-        if (overdueLog) {
+        // Condition logs are only ever stored once uploaded, so "what is still
+        // owed" comes from the quarterly schedule rather than from the rows.
+        const outstanding = firstOutstandingCheckpoint(conditionSchedule);
+
+        if (outstanding?.status === "overdue") {
           nextAction = {
             type: "condition_log_overdue",
-            message: `${overdueLog.logType} video overdue`,
-            dueDate: overdueLog.dueDate
+            message: "Quarterly condition video overdue",
+            dueDate: outstanding.dueDate
           };
-        } else {
-          // Check for upcoming condition logs (within 7 days)
-          const upcomingLog = conditionLogs.find(l => {
-            if (l.status !== 'pending') return false;
-            const daysUntilDue = Math.ceil((l.dueDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
-            return daysUntilDue >= 0 && daysUntilDue <= 7;
-          });
-
-          if (upcomingLog) {
-            const daysUntilDue = Math.ceil((upcomingLog.dueDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
-            nextAction = {
-              type: "condition_log_due_soon",
-              message: `${upcomingLog.logType} video due in ${daysUntilDue} day${daysUntilDue !== 1 ? 's' : ''}`,
-              dueDate: upcomingLog.dueDate
-            };
-          }
+        } else if (outstanding) {
+          const daysUntilDue = Math.ceil((outstanding.dueDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+          nextAction = {
+            type: "condition_log_due_soon",
+            message: `Quarterly condition video due in ${daysUntilDue} day${daysUntilDue !== 1 ? 's' : ''}`,
+            dueDate: outstanding.dueDate
+          };
         }
       }
     }
@@ -372,6 +435,7 @@ export class RentalService {
       capabilities,
       payments,
       conditionLogs,
+      conditionSchedule,
       nextAction,
       paymentSummary: {
         totalVerifiedAmount,
@@ -448,8 +512,8 @@ export class RentalService {
     assertRentalAcceptsNewBookings(rental);
 
     // Validate photo count
-    if (data.photoUrls && data.photoUrls.length > 3) {
-      throw new Error("Maximum 3 photos allowed");
+    if (data.photoUrls && data.photoUrls.length > MAX_CONDITION_LOG_PHOTOS) {
+      throw new Error(`Maximum ${MAX_CONDITION_LOG_PHOTOS} photos allowed`);
     }
 
     // Create log
@@ -519,8 +583,8 @@ export class RentalService {
     }
 
     // Validate photo count
-    if (data.photoUrls && data.photoUrls.length > 3) {
-      throw new Error("Maximum 3 photos allowed");
+    if (data.photoUrls && data.photoUrls.length > MAX_CONDITION_LOG_PHOTOS) {
+      throw new Error(`Maximum ${MAX_CONDITION_LOG_PHOTOS} photos allowed`);
     }
 
     // Update fields
@@ -835,6 +899,12 @@ export class RentalService {
     await rental.save();
 
     await Property.findByIdAndUpdate(rental.propertyId, { status: "inactive" });
+
+    await this.releaseChatKeepAlive(
+      rental.tenantId,
+      rental.landlordId,
+      rental.propertyId
+    );
 
     console.log(`🔚 Rental ended: ${rentalId} — property set inactive (off search)`);
 
