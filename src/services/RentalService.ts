@@ -12,6 +12,10 @@ import {
   assertRentalAcceptsTenantPayments,
   getRentalCapabilities,
 } from "../utils/rentalCapabilities";
+import {
+  buildQuarterlySchedule,
+  firstOutstandingCheckpoint,
+} from "./ConditionLogScheduleService";
 import { enrichRentalForApi } from "../utils/enrichRentalResponse";
 import { assertTenantHasNoActiveRental } from "../utils/tenantRentalLimits";
 import { Chat } from "../models/Chat";
@@ -358,6 +362,9 @@ export class RentalService {
     const conditionLogs = await ConditionLog.find({ rentalId: rental._id })
       .sort({ dueDate: 1 });
 
+    // Quarterly condition-report checkpoints, with the uploaded logs marked off.
+    const conditionSchedule = buildQuarterlySchedule(rental as any, conditionLogs as any[]);
+
     const capabilities = getRentalCapabilities(rental);
     const enrichedRental = await enrichRentalForApi(rental);
 
@@ -399,30 +406,23 @@ export class RentalService {
           dueDate: upcomingPayment.dueDate
         };
       } else {
-        // Check for overdue condition logs
-        const overdueLog = conditionLogs.find(l => l.status === 'pending' && l.dueDate < now);
-        if (overdueLog) {
+        // Condition logs are only ever stored once uploaded, so "what is still
+        // owed" comes from the quarterly schedule rather than from the rows.
+        const outstanding = firstOutstandingCheckpoint(conditionSchedule);
+
+        if (outstanding?.status === "overdue") {
           nextAction = {
             type: "condition_log_overdue",
-            message: `${overdueLog.logType} video overdue`,
-            dueDate: overdueLog.dueDate
+            message: "Quarterly condition video overdue",
+            dueDate: outstanding.dueDate
           };
-        } else {
-          // Check for upcoming condition logs (within 7 days)
-          const upcomingLog = conditionLogs.find(l => {
-            if (l.status !== 'pending') return false;
-            const daysUntilDue = Math.ceil((l.dueDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
-            return daysUntilDue >= 0 && daysUntilDue <= 7;
-          });
-
-          if (upcomingLog) {
-            const daysUntilDue = Math.ceil((upcomingLog.dueDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
-            nextAction = {
-              type: "condition_log_due_soon",
-              message: `${upcomingLog.logType} video due in ${daysUntilDue} day${daysUntilDue !== 1 ? 's' : ''}`,
-              dueDate: upcomingLog.dueDate
-            };
-          }
+        } else if (outstanding) {
+          const daysUntilDue = Math.ceil((outstanding.dueDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+          nextAction = {
+            type: "condition_log_due_soon",
+            message: `Quarterly condition video due in ${daysUntilDue} day${daysUntilDue !== 1 ? 's' : ''}`,
+            dueDate: outstanding.dueDate
+          };
         }
       }
     }
@@ -435,6 +435,7 @@ export class RentalService {
       capabilities,
       payments,
       conditionLogs,
+      conditionSchedule,
       nextAction,
       paymentSummary: {
         totalVerifiedAmount,

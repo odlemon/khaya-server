@@ -2,6 +2,7 @@
 import express from "express";
 import { runRentalReminderJob } from "../jobs/rentalReminderJob";
 import { runDistributionJob } from "../jobs/distributionJob";
+import { runConditionLogReminderJob } from "../jobs/conditionLogReminderJob";
 import { logger } from "../utils/logger";
 
 const router = express.Router();
@@ -77,6 +78,35 @@ router.get("/distribution", async (req, res) => {
       success: false, 
       error: error.message,
       timestamp: new Date().toISOString()
+    });
+  }
+});
+
+/**
+ * Quarterly Condition Report Reminder Cron Job
+ * Normally daily at 9 AM UTC — each checkpoint is only announced once, so a
+ * daily run simply picks up whichever tenancies have reached one.
+ * GET /api/cron/condition-log-reminders
+ */
+router.get("/condition-log-reminders", async (req, res) => {
+  const timestamp = new Date().toISOString();
+
+  try {
+    logger.info("🔄 Cron job triggered: Condition Log Reminders");
+    const result = await runConditionLogReminderJob();
+
+    res.status(200).json({
+      success: true,
+      message: "Condition log reminder job completed",
+      ...result,
+      timestamp,
+    });
+  } catch (error: any) {
+    logger.error("❌ Cron job failed: Condition Log Reminders", error);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      timestamp,
     });
   }
 });

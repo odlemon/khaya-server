@@ -26,7 +26,8 @@ export type NotificationType =
   | "maintenance_update"
   | "document_verification_submitted"
   | "document_verification_approved"
-  | "document_verification_rejected";
+  | "document_verification_rejected"
+  | "condition_log_due";
 
 export interface INotificationData {
   chatId?: string;
@@ -86,6 +87,7 @@ const notificationSchema = new Schema<INotification>(
         "document_verification_submitted",
         "document_verification_approved",
         "document_verification_rejected",
+        "condition_log_due",
       ],
       required: true,
     },
