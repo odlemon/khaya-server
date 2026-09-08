@@ -8,14 +8,38 @@ import { logger } from "../utils/logger";
 const router = express.Router();
 
 /**
- * Vercel Cron Jobs
- * 
- * These endpoints are called by Vercel's cron scheduler
- * They require VERCEL_CRON_SECRET header for security
+ * Cron Jobs
+ *
+ * These endpoints are called by a scheduler. They are GETs that *perform work* —
+ * one of them moves money (escrow distribution) and others email tenants — so
+ * they must not be open to the internet.
+ *
+ * Pass the secret as `x-cron-secret` or `?secret=`. Outside development a
+ * missing CRON_SECRET fails closed: better a reminder that does not run than a
+ * distribution anyone can trigger.
  */
+function requireCronSecret(req, res, next) {
+  const expected = process.env.CRON_SECRET;
+  const provided = req.get("x-cron-secret") || req.query.secret;
 
-// No secret verification for dev mode
-// TODO: Add secret verification for production
+  if (!expected) {
+    if (process.env.NODE_ENV === "production") {
+      logger.error("[cron] CRON_SECRET is not set — refusing to run cron endpoints");
+      return res.status(503).json({ success: false, message: "Cron is not configured." });
+    }
+    logger.warn("[cron] CRON_SECRET is not set — endpoint is unprotected (development only)");
+    return next();
+  }
+
+  if (provided !== expected) {
+    logger.warn(`[cron] rejected unauthenticated call to ${req.path}`);
+    return res.status(401).json({ success: false, message: "Unauthorized." });
+  }
+
+  return next();
+}
+
+router.use(requireCronSecret);
 
 /**
  * Rental Reminder Cron Job
