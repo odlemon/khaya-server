@@ -1,6 +1,7 @@
 // @ts-nocheck
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import { IAgreement } from "../models/Agreement";
+import { getPublicApiBaseUrl as publicApiBaseUrl } from "../utils/publicUrl";
 
 function formatDate(value: Date | string | undefined): string {
   if (!value) return "—";
@@ -171,16 +172,11 @@ export function getAgreementPdfFilename(agreement: IAgreement & Record<string, a
 
 /**
  * Public API origin for email download links.
+ * Re-exported so existing callers keep working; the resolution itself is shared
+ * with the password-reset link so the two can never point at different hosts.
  */
-export function getPublicApiBaseUrl(): string {
-  const raw =
-    process.env.BACKEND_URL ||
-    process.env.API_PUBLIC_URL ||
-    process.env.API_URL ||
-    `http://localhost:${process.env.PORT || 4002}`;
-  return raw.replace(/\/$/, "");
-}
+export { getPublicApiBaseUrl } from "../utils/publicUrl";
 
 export function buildPublicAgreementPdfUrl(publicPdfToken: string): string {
-  return `${getPublicApiBaseUrl()}/api/agreements/public/${publicPdfToken}/pdf`;
+  return `${publicApiBaseUrl()}/api/agreements/public/${publicPdfToken}/pdf`;
 }
