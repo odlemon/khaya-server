@@ -2,6 +2,8 @@
 import { Request, Response, NextFunction } from "express";
 import { rentalReminderService } from "../services/RentalReminderService";
 import { invoiceService } from "../services/InvoiceService";
+import { Invoice } from "../models/Invoice";
+import { buildInvoicePdfBuffer, getInvoicePdfFilename } from "../services/InvoicePdfService";
 import { Types } from "mongoose";
 
 export class TenantController {
@@ -85,6 +87,46 @@ export class TenantController {
    * Get all invoices for tenant
    * GET /api/tenant/invoices?rentalId=xxx (rentalId is required)
    */
+  /**
+   * Download one invoice as a PDF.
+   *
+   * Open to the tenant it belongs to and to that property's landlord — the
+   * landlord is a party to the tenancy and has no other way to obtain a copy.
+   */
+  async downloadInvoicePdf(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { invoiceId } = req.params;
+      const userId = (req as any).user._id.toString();
+
+      if (!Types.ObjectId.isValid(invoiceId)) {
+        return res.status(400).json({ success: false, message: "Invalid invoice ID" });
+      }
+
+      const invoice = await Invoice.findById(invoiceId);
+      if (!invoice) {
+        return res.status(404).json({ success: false, message: "Invoice not found" });
+      }
+
+      const isTenant = invoice.tenantId?.toString() === userId;
+      const isLandlord = invoice.landlordId?.toString() === userId;
+      if (!isTenant && !isLandlord) {
+        return res.status(403).json({ success: false, message: "This invoice is not yours" });
+      }
+
+      const pdf = await buildInvoicePdfBuffer(invoice as any);
+
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename="${getInvoicePdfFilename(invoice as any)}"`
+      );
+      res.setHeader("Content-Length", pdf.length.toString());
+      return res.status(200).send(pdf);
+    } catch (error) {
+      next(error);
+    }
+  }
+
   async getAllInvoices(req: Request, res: Response, next: NextFunction) {
     try {
       const tenantId = (req as any).user._id;

@@ -3,6 +3,7 @@ import express from "express";
 import { runRentalReminderJob } from "../jobs/rentalReminderJob";
 import { runDistributionJob } from "../jobs/distributionJob";
 import { runConditionLogReminderJob } from "../jobs/conditionLogReminderJob";
+import { runInvoiceReminderJob } from "../jobs/invoiceReminderJob";
 import { logger } from "../utils/logger";
 
 const router = express.Router();
@@ -127,6 +128,33 @@ router.get("/condition-log-reminders", async (req, res) => {
     });
   } catch (error: any) {
     logger.error("❌ Cron job failed: Condition Log Reminders", error);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      timestamp,
+    });
+  }
+});
+
+/**
+ * Invoice Reminder Cron Job
+ * GET /api/cron/invoice-reminders
+ */
+router.get("/invoice-reminders", async (req, res) => {
+  const timestamp = new Date().toISOString();
+
+  try {
+    logger.info("🔄 Cron job triggered: Invoice Reminders");
+    const result = await runInvoiceReminderJob();
+
+    res.status(200).json({
+      success: true,
+      message: "Invoice reminder job completed",
+      ...result,
+      timestamp,
+    });
+  } catch (error: any) {
+    logger.error("❌ Cron job failed: Invoice Reminders", error);
     res.status(500).json({
       success: false,
       error: error.message,

@@ -17,6 +17,10 @@ router.get("/rental-reminders", authorize(["tenant"]), tenantController.getUpcom
 
 // Invoice generation
 router.get("/invoices", authorize(["tenant"]), tenantController.getAllInvoices.bind(tenantController));
+// Declared before /invoices/:paymentId so the two-segment PDF path is not shadowed.
+// Not tenant-only: the landlord is a party to the tenancy and the handler checks
+// that the caller is one of the two.
+router.get("/invoices/:invoiceId/pdf", authorize(["tenant", "landlord"]), tenantController.downloadInvoicePdf.bind(tenantController));
 router.get("/invoices/:paymentId", authorize(["tenant"]), tenantController.generateInvoice.bind(tenantController));
 
 export default router;

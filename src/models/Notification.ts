@@ -88,6 +88,7 @@ const notificationSchema = new Schema<INotification>(
         "document_verification_approved",
         "document_verification_rejected",
         "condition_log_due",
+        "invoice_due",
       ],
       required: true,
     },
