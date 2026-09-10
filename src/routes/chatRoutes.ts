@@ -34,6 +34,7 @@ router.get("/pending-requests", authorize(["tenant"]), chatController.getTenantP
 // Admin-specific routes
 router.get("/admin/all-chats", authorize(["admin"]), requirePermission("khayalami.chat.view"), chatController.getAllChats.bind(chatController));
 router.post("/admin/join/:chatId", authorize(["admin"]), requirePermission("khayalami.chat.join"), chatController.adminJoinChat.bind(chatController));
+router.post("/admin/start", authorize(["admin"]), requirePermission("khayalami.chat.send"), chatController.adminStartChat.bind(chatController));
 router.post("/admin/cleanup-duplicates", authorize(["admin"]), requirePermission("khayalami.chat.view"), chatController.cleanupDuplicateParticipants.bind(chatController));
 router.post("/admin/link-to-property", authorize(["admin"]), requirePermission("khayalami.chat.view"), chatController.linkChatToProperty.bind(chatController));
 

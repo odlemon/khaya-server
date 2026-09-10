@@ -1,4 +1,5 @@
 // @ts-nocheck
+import { rentedUnitsService } from "../services/RentedUnitsService";
 import { Request, Response, NextFunction } from "express";
 import { User } from "../models/User";
 import { Property } from "../models/Property";
@@ -775,6 +776,39 @@ export class AdminController {
           connectionStats,
           period: `${days} days`
         }
+      });
+    } catch (error: any) {
+      next(error);
+    }
+  }
+
+  /**
+   * Currently rented units, for customer service to work from.
+   */
+  async getRentedUnits(req: Request, res: Response, next: NextFunction) {
+    try {
+      const units = await rentedUnitsService.listRentedUnits();
+      res.status(200).json({
+        success: true,
+        message: "Rented units retrieved successfully",
+        data: units,
+      });
+    } catch (error: any) {
+      next(error);
+    }
+  }
+
+  /**
+   * Reminder history for one unit, so staff can see what a tenant already got.
+   */
+  async getRentedUnitReminders(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { rentalId } = req.params;
+      const reminders = await rentedUnitsService.listRemindersForRental(rentalId);
+      res.status(200).json({
+        success: true,
+        message: "Reminders retrieved successfully",
+        data: reminders,
       });
     } catch (error: any) {
       next(error);

@@ -28,6 +28,19 @@ router.post(
   adminController.reinstateUserAccount.bind(adminController)
 );
 
+// Customer-service view of occupied properties, and what each tenant has
+// already been sent, so staff can follow up without contacting people twice.
+router.get(
+  "/rented-units",
+  requirePermission("khayalami.properties.view"),
+  adminController.getRentedUnits.bind(adminController)
+);
+router.get(
+  "/rented-units/:rentalId/reminders",
+  requirePermission("khayalami.properties.view"),
+  adminController.getRentedUnitReminders.bind(adminController)
+);
+
 router.get(
   "/dashboard/stats",
   requirePermission("khayalami.dashboard.view"),

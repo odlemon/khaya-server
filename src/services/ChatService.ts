@@ -142,6 +142,64 @@ export class ChatService {
   }
 
   /**
+   * Open a support conversation between a staff member and a tenant or landlord.
+   *
+   * getOrCreateChat cannot be reused: it demands an accepted Connection for a
+   * tenant/landlord/property triple, and support staff are party to no such
+   * connection. The chat is still tied to a property — support always starts
+   * from a specific rented unit — so it stays the shape every read path expects
+   * and shows up in the recipient's list like any other conversation.
+   */
+  async startSupportChat(staffId: any, targetUserId: any, propertyId: any): Promise<IChat> {
+    const staffIdStr = staffId?.toString?.() || staffId;
+    const targetIdStr = targetUserId?.toString?.() || targetUserId;
+    const propertyIdStr = propertyId?.toString?.() || propertyId;
+
+    if (!staffIdStr || !targetIdStr || !propertyIdStr) {
+      throw new Error("Staff, recipient and property are all required");
+    }
+    if (staffIdStr === targetIdStr) {
+      throw new Error("Cannot start a support chat with yourself");
+    }
+
+    const target = await User.findById(targetIdStr).select("_id role");
+    if (!target) {
+      throw new Error("Recipient not found");
+    }
+
+    let chat = await Chat.findOne({
+      participants: { $all: [staffIdStr, targetIdStr] },
+      propertyId: propertyIdStr,
+    })
+      .populate("participants", "firstName lastName email role profile.avatar")
+      .populate("propertyId", "title address price serviceFeePayer images propertyType status bedrooms bathrooms landlordId");
+
+    if (chat && !chat.isActive) {
+      chat.isActive = true;
+      chat.archivedAt = undefined;
+      await chat.save();
+    }
+
+    if (!chat) {
+      chat = new Chat({
+        participants: [staffIdStr, targetIdStr],
+        propertyId: propertyIdStr,
+        isActive: true,
+        lastActivityAt: new Date(),
+      });
+      await chat.save();
+      await chat.populate("participants", "firstName lastName email role profile.avatar");
+      await chat.populate(
+        "propertyId",
+        "title address price serviceFeePayer images propertyType status bedrooms bathrooms landlordId"
+      );
+      console.log(`✅ Support chat opened: staff ${staffIdStr} → user ${targetIdStr}`);
+    }
+
+    return chat;
+  }
+
+  /**
    * Get user's chats (both as tenant and landlord)
    * Handles old chats without propertyId by attempting to link them via Connections
    */

@@ -741,6 +741,35 @@ export class ChatController {
   }
 
   /**
+   * Admin - Open a support chat with a tenant or landlord (Admin only)
+   *
+   * Staff could previously only join conversations someone else had started.
+   */
+  async adminStartChat(req: Request, res: Response, next: NextFunction) {
+    try {
+      const staffId = (req as any).user._id;
+      const { userId, propertyId } = req.body || {};
+
+      if (!userId || !propertyId) {
+        return res.status(400).json({
+          success: false,
+          message: "userId and propertyId are required",
+        });
+      }
+
+      const chat = await chatService.startSupportChat(staffId, userId, propertyId);
+
+      res.status(200).json({
+        success: true,
+        message: "Support chat ready",
+        data: chat,
+      });
+    } catch (error: any) {
+      next(error);
+    }
+  }
+
+  /**
    * Admin - Clean up duplicate participants (Admin only)
    */
   async cleanupDuplicateParticipants(req: Request, res: Response, next: NextFunction) {
