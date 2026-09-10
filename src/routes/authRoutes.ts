@@ -18,6 +18,7 @@ router.post("/forgot-password", authController.forgotPassword.bind(authControlle
 // form (responding with HTML) and the app's JSON call.
 router.get("/reset-password", authController.resetPasswordPage.bind(authController));
 router.post("/reset-password", authController.resetPassword.bind(authController));
+router.post("/logout", authController.logout.bind(authController));
 router.post("/change-password", authenticate, authController.changePassword.bind(authController));
 router.post("/verify-2fa", authController.verify2FALogin.bind(authController));
 router.get("/me", authenticate,  authController.me.bind(authController));

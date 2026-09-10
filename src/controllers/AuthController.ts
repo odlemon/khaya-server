@@ -5,6 +5,7 @@ import { User } from "../models/User";
 import { EmailVerificationService } from "../services/EmailVerificationService";
 import { TwoFactorAuthService } from "../services/TwoFactorAuthService";
 import { PasswordResetService } from "../services/PasswordResetService";
+import { pushTokenService } from "../services/PushTokenService";
 import {
   renderResetForm,
   renderResetResult,
@@ -308,6 +309,29 @@ export class AuthController {
           message: result.message
         });
       }
+    } catch (error: any) {
+      next(error);
+    }
+  }
+
+  /**
+   * Sign out (public).
+   *
+   * The app has always POSTed here on logout; there was no such route, so it
+   * 404'd and the failure was swallowed. Its real job is detaching this handset
+   * from the account: JWTs are stateless, but a device token left registered
+   * keeps pushing the signed-out user's chats to the phone.
+   *
+   * Deliberately not behind `authenticate` — the client clears its token before
+   * calling, so requiring auth here would 401 and defeat the purpose.
+   */
+  async logout(req: Request, res: Response, next: NextFunction) {
+    try {
+      const token = req.body?.token;
+      if (token && typeof token === "string") {
+        await pushTokenService.removeTokenByValue(token);
+      }
+      return res.status(200).json({ success: true, message: "Logged out." });
     } catch (error: any) {
       next(error);
     }

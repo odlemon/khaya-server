@@ -7,6 +7,7 @@ import { Signature, ISignature } from "../models/Signature";
 import { Types } from "mongoose";
 import crypto from "crypto";
 import { assertTenantHasNoActiveRental } from "../utils/tenantRentalLimits";
+import { logger } from "../utils/logger";
 
 export interface CreateAgreementData {
   // Required - Selection
@@ -982,7 +983,13 @@ export class AgreementService {
         agreement.propertyId
       );
     } catch (err: any) {
-      console.error(`❌ Post-termination cleanup failed for agreement ${agreementId}:`, err.message);
+      // The agreement is already saved as terminated, so re-throwing here would
+      // report failure for something that partly succeeded. Log it loudly instead;
+      // findTenantActiveRental repairs a rental left behind this way, so a failure
+      // here can no longer strand the tenant.
+      logger.error(
+        `❌ Post-termination cleanup failed for agreement ${agreementId} — rental may still read as active until repaired: ${err.message}`
+      );
     }
 
     // Send notification to both parties
@@ -1130,7 +1137,13 @@ export class AgreementService {
         agreement.propertyId
       );
     } catch (err: any) {
-      console.error(`❌ Post-termination cleanup failed for agreement ${agreementId}:`, err.message);
+      // The agreement is already saved as terminated, so re-throwing here would
+      // report failure for something that partly succeeded. Log it loudly instead;
+      // findTenantActiveRental repairs a rental left behind this way, so a failure
+      // here can no longer strand the tenant.
+      logger.error(
+        `❌ Post-termination cleanup failed for agreement ${agreementId} — rental may still read as active until repaired: ${err.message}`
+      );
     }
 
     return agreement;

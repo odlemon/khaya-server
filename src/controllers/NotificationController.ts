@@ -127,6 +127,41 @@ export class NotificationController {
       next(error);
     }
   }
+
+  /**
+   * Detach this device from the account, so push stops on logout.
+   *
+   * Removing by token value rather than by user is deliberate: the token belongs
+   * to the handset, and leaving it attached is what kept delivering one person's
+   * chats to a phone that had already signed out — or worse, to whoever signed in
+   * on that handset next.
+   */
+  async unregisterDeviceToken(req: Request, res: Response, next: NextFunction) {
+    try {
+      const userId = (req as any).user._id.toString();
+      const token = req.body?.token;
+
+      if (!token || typeof token !== "string") {
+        return res.status(400).json({
+          success: false,
+          message: "FCM token is required",
+        });
+      }
+
+      const removed = await pushTokenService.removeToken(userId, token);
+      if (!removed) {
+        // Token may be registered to a different account on a shared handset.
+        await pushTokenService.removeTokenByValue(token);
+      }
+
+      res.json({
+        success: true,
+        message: "Device token removed",
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
 }
 
 export const notificationController = new NotificationController();

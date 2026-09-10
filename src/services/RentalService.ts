@@ -917,7 +917,23 @@ export class RentalService {
   async finalizeAgreementTermination(agreementId: string, propertyId: unknown): Promise<void> {
     const propertyObjectId = (propertyId as any)?._id ?? propertyId;
 
-    const rental = await Rental.findOne({ agreementId });
+    let rental = await Rental.findOne({ agreementId });
+
+    // Not every rental carries a usable agreementId. Without this fallback a
+    // mismatch left the rental active while the agreement read as terminated,
+    // which is what kept tenants from being able to request another property.
+    if (!rental && propertyObjectId) {
+      rental = await Rental.findOne({
+        propertyId: propertyObjectId,
+        status: { $in: ["active", "suspended"] },
+      });
+      if (rental) {
+        console.warn(
+          `⚠️  Rental ${rental._id} had no matching agreementId; ended it via property ${propertyObjectId}`
+        );
+      }
+    }
+
     if (rental && rental.status !== "ended") {
       await this.endRental(rental._id.toString());
       return;
